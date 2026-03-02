@@ -1,0 +1,11 @@
+{
+  "name": "call-liner",
+  "private": true,
+  "packageManager": "pnpm@10.26.0",
+  "scripts": {
+    "dev": "pnpm --filter call-liner dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}
+
