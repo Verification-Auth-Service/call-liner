@@ -72,6 +72,32 @@ describe("writeEntryAstReports", () => {
     }
   });
 
+  it("collects program files recursively when a directory is passed", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+
+    try {
+      const directoryEntry = path.join("apps", "resource-server", "app");
+      const sourceDir = path.join(tempRoot, directoryEntry);
+      await mkdir(path.join(sourceDir, "nested"), { recursive: true });
+      await writeFile(path.join(sourceDir, "routes.ts"), "export const routes = [];", "utf8");
+      await writeFile(path.join(sourceDir, "nested", "helper.tsx"), "export const helper = () => null;", "utf8");
+      await writeFile(path.join(sourceDir, "README.md"), "not a program file", "utf8");
+
+      const outputDir = path.join(tempRoot, "report");
+      await writeEntryAstReports({
+        entries: [directoryEntry],
+        outputDir,
+        baseDir: tempRoot,
+      });
+
+      expect(existsSync(path.join(outputDir, `${directoryEntry}/routes.ts.json`))).toBe(true);
+      expect(existsSync(path.join(outputDir, `${directoryEntry}/nested/helper.tsx.json`))).toBe(true);
+      expect(existsSync(path.join(outputDir, `${directoryEntry}/README.md.json`))).toBe(false);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("throws when an entry file does not exist", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
 
