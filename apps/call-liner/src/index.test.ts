@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { type AstJsonNode, programToAstJson } from "./ast/program-to-ast-json";
+import { run } from "./app/run";
 import { writeEntryAstReports } from "./app/write-entry-ast-reports";
 import { parseCliArgs } from "./cli/parse-cli-args";
 import { formatCallLine } from "./format/format-call-line";
@@ -105,7 +106,10 @@ describe("writeEntryAstReports", () => {
 
       const outputDir = path.join(tempRoot, "report");
       await writeEntryAstReports({
-        entries: [absoluteEntry, relativeEntry],
+        entries: new Map([
+          ["client", [absoluteEntry]],
+          ["resource", [relativeEntry]],
+        ]),
         outputDir,
         baseDir: tempRoot,
       });
@@ -152,7 +156,7 @@ describe("writeEntryAstReports", () => {
 
       const outputDir = path.join(tempRoot, "report");
       await writeEntryAstReports({
-        entries: [directoryEntry],
+        entries: new Map([["resource", [directoryEntry]]]),
         outputDir,
         baseDir: tempRoot,
       });
@@ -179,12 +183,96 @@ describe("writeEntryAstReports", () => {
     try {
       await expect(
         writeEntryAstReports({
-          entries: ["missing.ts"],
+          entries: new Map([["resource", ["missing.ts"]]]),
           outputDir: path.join(tempRoot, "report"),
           baseDir: tempRoot,
         }),
       ).rejects.toThrowError();
     } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("run", () => {
+  it("writes entrypoints.json with report json files while preserving directory structure", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+    const previousInitCwd = process.env.INIT_CWD;
+
+    try {
+      const clientEntry = path.join("apps", "auth-app", "app", "root.tsx");
+      const resourceEntry = path.join("apps", "resource-server", "app");
+
+      await mkdir(path.join(tempRoot, "apps", "auth-app", "app"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, clientEntry),
+        "export const root = null;",
+        "utf8",
+      );
+
+      await mkdir(path.join(tempRoot, "apps", "resource-server", "app", "api"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, resourceEntry, "routes.ts"),
+        "export const routes = [];",
+        "utf8",
+      );
+      await writeFile(
+        path.join(tempRoot, resourceEntry, "api", "health.ts"),
+        "export const health = 'ok';",
+        "utf8",
+      );
+
+      process.env.INIT_CWD = tempRoot;
+      await run([
+        "--client-entry",
+        clientEntry,
+        "--resource-entry",
+        resourceEntry,
+      ]);
+
+      const entrypointsRaw = await readFile(
+        path.join(tempRoot, "report", "entrypoints.json"),
+        "utf8",
+      );
+      const entrypoints = JSON.parse(entrypointsRaw) as {
+        writtenFiles: {
+          client: Record<string, unknown>;
+          resource: Record<string, unknown>;
+        };
+      };
+
+      expect(entrypoints.writtenFiles.client).toEqual({
+        apps: {
+          "auth-app": {
+            app: {
+              "root.tsx.json": "apps/auth-app/app/root.tsx.json",
+            },
+          },
+        },
+      });
+
+      expect(entrypoints.writtenFiles.resource).toEqual({
+        apps: {
+          "resource-server": {
+            app: {
+              "routes.ts.json": "apps/resource-server/app/routes.ts.json",
+              api: {
+                "health.ts.json": "apps/resource-server/app/api/health.ts.json",
+              },
+            },
+          },
+        },
+      });
+    } finally {
+      if (previousInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previousInitCwd;
+      }
       await rm(tempRoot, { recursive: true, force: true });
     }
   });

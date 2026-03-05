@@ -3,7 +3,7 @@ import path from "node:path";
 import { programToAstJson } from "../ast/program-to-ast-json";
 
 type WriteEntryAstReportsOptions = {
-  entries: string[];
+  entries: Map<string, string[]>;
   outputDir: string;
   baseDir: string;
 };
@@ -103,7 +103,7 @@ function toReportRelativePathForSource(
  * エントリーファイル群を AST(JSON) として `report` 配下に保存する。
  *
  * 入力例:
- * - entries: ["/tmp/auth/routes.ts", "apps/resource-server/app"]
+ * - entries: Map([["client", ["/tmp/auth/routes.ts"]], ["resource", ["apps/resource-server/app"]]])
  * - outputDir: "/work/call-liner/report"
  * - baseDir: "/work/call-liner"
  *
@@ -113,21 +113,27 @@ function toReportRelativePathForSource(
  */
 export async function writeEntryAstReports(
   options: WriteEntryAstReportsOptions,
-): Promise<void> {
-  for (const entryPath of options.entries) {
-    const sourceRootPath = path.isAbsolute(entryPath)
-      ? entryPath
-      : path.resolve(options.baseDir, entryPath);
-    const sourcePaths = await collectProgramFiles(sourceRootPath);
+): Promise<Map<string, string>> {
+  const fileWritePaths = new Map<string, string>();
 
-    for (const sourcePath of sourcePaths) {
-      const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
-      const reportPath = path.join(options.outputDir, reportRelativePath);
-      const sourceCode = await readFile(sourcePath, "utf8");
-      const astTree = programToAstJson(sourceCode, sourcePath);
+  for (const [, entryPaths] of options.entries) {
+    for (const entryPath of entryPaths) {
+      const sourceRootPath = path.isAbsolute(entryPath)
+        ? entryPath
+        : path.resolve(options.baseDir, entryPath);
+      const sourcePaths = await collectProgramFiles(sourceRootPath);
 
-      await mkdir(path.dirname(reportPath), { recursive: true });
-      await writeFile(reportPath, JSON.stringify(astTree, null, 2), "utf8");
+      for (const sourcePath of sourcePaths) {
+        const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
+        const reportPath = path.join(options.outputDir, reportRelativePath);
+        const sourceCode = await readFile(sourcePath, "utf8");
+        const astTree = programToAstJson(sourceCode, sourcePath);
+
+        await mkdir(path.dirname(reportPath), { recursive: true });
+        await writeFile(reportPath, JSON.stringify(astTree, null, 2), "utf8");
+        fileWritePaths.set(sourcePath, reportPath);
+      }
     }
   }
+  return fileWritePaths;
 }
