@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { v4 as uuidv4 } from "uuid";
+import { hashString } from "~/helper/hash";
 
 export type AstJsonNode = {
   kind: string;
@@ -77,7 +77,11 @@ function toAstJsonNode(
     literalValue,
     type,
     children,
-    uniqueId: uuidv4(),
+    uniqueId: (() => {
+      // kind/pos/end/fileName でhash化
+      const baseString = `${ts.SyntaxKind[node.kind]}-${node.pos}-${node.end}-${sourceFile.fileName}`;
+      return hashString(baseString);
+    })(),
     fileName: sourceFile.fileName,
   };
 }
