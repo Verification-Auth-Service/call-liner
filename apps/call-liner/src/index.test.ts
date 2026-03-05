@@ -250,6 +250,49 @@ describe("writeEntryAstReports", () => {
     }
   });
 
+  it("includes type declaration locations in generated report json", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+
+    try {
+      const entryDir = path.join("src");
+      const mainPath = path.join(tempRoot, "src", "main.ts");
+      const typesPath = path.join(tempRoot, "src", "types.ts");
+      await mkdir(path.dirname(mainPath), { recursive: true });
+      await writeFile(typesPath, "export type UserId = string;", "utf8");
+      await writeFile(
+        mainPath,
+        'import type { UserId } from "./types";\nconst id: UserId = "u1";\nconsole.log(id);',
+        "utf8",
+      );
+
+      const outputDir = path.join(tempRoot, "report");
+      await writeEntryAstReports({
+        entries: new Map([["resource", [entryDir]]]),
+        outputDir,
+        baseDir: tempRoot,
+      });
+
+      const reportPath = path.join(outputDir, "src/main.ts.json");
+      const reportRaw = await readFile(reportPath, "utf8");
+      const reportTree = JSON.parse(reportRaw) as AstJsonNode;
+      const collectNodes = (node: AstJsonNode): AstJsonNode[] => {
+        return [node, ...node.children.flatMap(collectNodes)];
+      };
+      const userIdTypeReference = collectNodes(reportTree).find(
+        (node) =>
+          node.kind === "Identifier" &&
+          node.text === "UserId" &&
+          node.typeDeclarationFileName === typesPath,
+      );
+
+      expect(userIdTypeReference).toBeDefined();
+      expect(userIdTypeReference?.typeDeclarationFileName).toBe(typesPath);
+      expect(userIdTypeReference?.typeDeclarationPos).toBeTypeOf("number");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("throws when an entry file does not exist", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
 

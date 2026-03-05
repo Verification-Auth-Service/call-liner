@@ -115,4 +115,35 @@ describe("AstMethods", () => {
     ).toBeUndefined();
     expect(AstMethods.getDeclarationPos(unresolvedIdentifier!)).toBeUndefined();
   });
+
+  it("returns type declaration metadata for imported type aliases", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+
+    try {
+      const typesPath = path.join(tempRoot, "types.ts");
+      const mainPath = path.join(tempRoot, "main.ts");
+      await writeFile(typesPath, "export type UserId = string;", "utf8");
+      const root = programToAstJson(
+        'import type { UserId } from "./types";\nconst id: UserId = "u1";',
+        mainPath,
+      );
+      const nodes = collectNodes(root);
+      const userIdTypeReference = nodes.find(
+        (node) =>
+          node.kind === "Identifier" &&
+          node.text === "UserId" &&
+          node.typeDeclarationFileName === typesPath,
+      );
+
+      expect(userIdTypeReference).toBeDefined();
+      expect(AstMethods.getTypeDeclarationFileName(userIdTypeReference!)).toBe(
+        typesPath,
+      );
+      expect(AstMethods.getTypeDeclarationPos(userIdTypeReference!)).toBeTypeOf(
+        "number",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

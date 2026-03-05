@@ -32,6 +32,16 @@ class AstMethods {
     return node.type;
   }
 
+  // 型シンボルの宣言ファイル名（取得できない場合は undefined）
+  static getTypeDeclarationFileName(node: AstJsonNode): string | undefined {
+    return node.typeDeclarationFileName;
+  }
+
+  // 型シンボルの宣言位置（取得できない場合は undefined）
+  static getTypeDeclarationPos(node: AstJsonNode): number | undefined {
+    return node.typeDeclarationPos;
+  }
+
   // 識別子ノードのシンボル名（取得できない場合は undefined）
   static getSymbolName(node: AstJsonNode): string | undefined {
     return node.symbolName;

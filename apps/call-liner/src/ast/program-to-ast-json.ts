@@ -8,6 +8,8 @@ export type AstJsonNode = {
   text?: string;
   literalValue?: string | number | boolean | null;
   type?: string;
+  typeDeclarationFileName?: string;
+  typeDeclarationPos?: number;
   symbolName?: string;
   resolvedSymbolName?: string;
   symbolResolution?: SymbolResolutionInfo;
@@ -67,10 +69,68 @@ function toLiteralValue(
 function toNodeType(
   node: ts.Node,
   checker: ts.TypeChecker,
-): string | undefined {
+):
+  | {
+      type?: string;
+      typeDeclarationFileName?: string;
+      typeDeclarationPos?: number;
+    }
+  | undefined {
   try {
+    const toDeclarationFromSymbol = (
+      symbol: ts.Symbol | undefined,
+    ): ts.Declaration | undefined => {
+      // シンボルが無い場合は宣言位置を特定できないため undefined を返す。
+      if (!symbol) {
+        return undefined;
+      }
+
+      const resolvedSymbol =
+        // import type 由来の alias は実体シンボルに解決してから宣言を参照する。
+        symbol.flags & ts.SymbolFlags.Alias
+          ? checker.getAliasedSymbol(symbol)
+          : symbol;
+
+      return resolvedSymbol.declarations?.[0];
+    };
     const type = checker.getTypeAtLocation(node);
-    return checker.typeToString(type, node, ts.TypeFormatFlags.NoTruncation);
+    const typeName = checker.typeToString(
+      type,
+      node,
+      ts.TypeFormatFlags.NoTruncation,
+    );
+    const typeReferenceNode = (() => {
+      // `UserId` ノード自体または `UserId` を含む TypeReference 親を優先して型宣言を解決する。
+      if (ts.isTypeReferenceNode(node)) {
+        return node;
+      }
+
+      if (ts.isIdentifier(node) && ts.isTypeReferenceNode(node.parent)) {
+        return node.parent;
+      }
+
+      return undefined;
+    })();
+    const declaration =
+      // 型注釈中のシンボル解決を優先し、alias 型定義の位置を report に反映する。
+      typeReferenceNode && ts.isIdentifier(typeReferenceNode.typeName)
+        ? toDeclarationFromSymbol(
+            checker.getSymbolAtLocation(typeReferenceNode.typeName),
+          )
+        : toDeclarationFromSymbol(type.aliasSymbol ?? type.getSymbol());
+
+    // 宣言位置が無い型でも型文字列表現は report へ残す。
+    if (!declaration) {
+      return {
+        type: typeName,
+      };
+    }
+
+    return {
+      type: typeName,
+      typeDeclarationFileName: declaration.getSourceFile().fileName,
+      typeDeclarationPos: declaration.pos,
+    };
   } catch {
     // 型取得不可ノードは report 生成を止めず、型情報なしで継続する。
     return undefined;
@@ -161,7 +221,7 @@ function toAstJsonNode(
   });
 
   const literalValue = toLiteralValue(node);
-  const type = toNodeType(node, checker);
+  const typeInfo = toNodeType(node, checker);
   const symbolInfo = toSymbolInfo(node, checker);
   const text = children.length === 0 ? node.getText(sourceFile) : undefined;
 
@@ -171,7 +231,9 @@ function toAstJsonNode(
     end: node.end,
     text,
     literalValue,
-    type,
+    type: typeInfo?.type,
+    typeDeclarationFileName: typeInfo?.typeDeclarationFileName,
+    typeDeclarationPos: typeInfo?.typeDeclarationPos,
     symbolName: symbolInfo?.symbolName,
     resolvedSymbolName: symbolInfo?.resolvedSymbolName,
     symbolResolution: symbolInfo?.symbolResolution,
