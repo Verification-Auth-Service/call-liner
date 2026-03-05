@@ -25,6 +25,8 @@ describe("parseCliArgs", () => {
       outputAstJson: true,
       clientEntry: "/tmp/client.tsx",
       resourceEntry: "/tmp/resource.ts",
+      clientFramework: "generic",
+      resourceFramework: "generic",
     });
   });
 
@@ -34,11 +36,46 @@ describe("parseCliArgs", () => {
       outputAstJson: false,
       clientEntry: "/tmp/client.tsx",
       resourceEntry: undefined,
+      clientFramework: "generic",
+      resourceFramework: "generic",
     });
   });
 
   it("throws when client-entry is missing", () => {
     expect(() => parseCliArgs(["-d"])).toThrowError("使い方:");
+  });
+
+  it("parses framework options", () => {
+    expect(
+      parseCliArgs([
+        "--client-entry",
+        "/tmp/client.tsx",
+        "--resource-entry",
+        "/tmp/resource.ts",
+        "--client-framework",
+        "react-router",
+        "--resource-framework",
+        "react-router",
+      ]),
+    ).toEqual({
+      debug: false,
+      outputAstJson: false,
+      clientEntry: "/tmp/client.tsx",
+      resourceEntry: "/tmp/resource.ts",
+      clientFramework: "react-router",
+      resourceFramework: "react-router",
+    });
+  });
+
+  it("throws when framework option is unsupported", () => {
+    expect(() =>
+      parseCliArgs([
+        "--client-entry",
+        "/tmp/client.tsx",
+        "--client-framework",
+        "unknown-framework",
+      ]),
+    ).toThrowError("--client-framework");
   });
 });
 
@@ -505,6 +542,93 @@ describe("run", () => {
         entryType: "client",
         sourcePath: path.join(tempRoot, clientEntry),
       });
+    } finally {
+      if (previousInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previousInitCwd;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("enumerates react-router routes from directory naming conventions", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+    const previousInitCwd = process.env.INIT_CWD;
+
+    try {
+      const clientAppDir = path.join("apps", "auth-app", "app");
+      await mkdir(path.join(tempRoot, clientAppDir, "routes", "admin"), {
+        recursive: true,
+      });
+      await mkdir(path.join(tempRoot, clientAppDir, "routes", "_auth"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, clientAppDir, "root.tsx"),
+        "export default function Root() { return null; }",
+        "utf8",
+      );
+      await writeFile(
+        path.join(tempRoot, clientAppDir, "routes", "_index.tsx"),
+        "export default function Index() { return null; }",
+        "utf8",
+      );
+      await writeFile(
+        path.join(tempRoot, clientAppDir, "routes", "posts.$postId.tsx"),
+        "export default function Post() { return null; }",
+        "utf8",
+      );
+      await writeFile(
+        path.join(tempRoot, clientAppDir, "routes", "admin", "route.tsx"),
+        "export default function Admin() { return null; }",
+        "utf8",
+      );
+      await writeFile(
+        path.join(tempRoot, clientAppDir, "routes", "_auth", "login.tsx"),
+        "export default function Login() { return null; }",
+        "utf8",
+      );
+
+      process.env.INIT_CWD = tempRoot;
+      await run([
+        "--ast-json",
+        "--client-entry",
+        clientAppDir,
+        "--client-framework",
+        "react-router",
+      ]);
+
+      const entrypointsRaw = await readFile(
+        path.join(tempRoot, "report", "entrypoints.json"),
+        "utf8",
+      );
+      const entrypoints = JSON.parse(entrypointsRaw) as {
+        resolvedEntries: Record<string, string[]>;
+        routesByEntry: Record<
+          string,
+          Array<{ sourcePath: string; routeId: string; routePath: string }>
+        >;
+      };
+      const astDataRaw = await readFile(
+        path.join(tempRoot, "report", "ast-data.json"),
+        "utf8",
+      );
+      const astData = JSON.parse(astDataRaw) as {
+        reports: Array<{ sourcePath: string }>;
+      };
+      const routePaths = entrypoints.routesByEntry.client
+        .map((route) => route.routePath)
+        .sort();
+
+      expect(routePaths).toEqual(["/", "/admin", "/login", "/posts/:postId"]);
+      expect(entrypoints.resolvedEntries.client.length).toBe(5);
+      expect(
+        entrypoints.resolvedEntries.client.some((sourcePath) =>
+          sourcePath.endsWith(path.join("app", "root.tsx")),
+        ),
+      ).toBe(true);
+      expect(astData.reports).toHaveLength(5);
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;

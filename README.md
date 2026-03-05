@@ -33,6 +33,12 @@ pnpm dev -- --ast-json --client-entry /path/to/client.tsx --resource-entry /path
 
 実行後、`report/entrypoints.json` が生成されます（`-d` / `--ast-json` は必要に応じて追加）。
 
+`--client-framework` / `--resource-framework` でフレームワーク戦略を切り替えできます（`generic` / `react-router`）。
+
+```bash
+pnpm dev -- --ast-json --client-entry apps/auth-app/app --client-framework react-router
+```
+
 ### 2) アプリ配下から直接実行
 
 ```bash

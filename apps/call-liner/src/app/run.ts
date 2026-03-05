@@ -3,6 +3,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseCliArgs } from "../cli/parse-cli-args";
 import { promptDeleteOutputDir } from "../cli/prompt-delete-output-dir";
+import {
+  createFrameworkEntryStrategy,
+  type EnumeratedRoute,
+} from "../framework/framework-entry-strategy";
 import type {
   EntryAstJson,
   EntryAstJsonReport,
@@ -155,6 +159,55 @@ function toEntriesObject(
 }
 
 /**
+ * framework 戦略でエントリーパスを解決し、entryType ごとの routes も収集する。
+ *
+ * 入力例:
+ * - {
+ *     client: { framework: "react-router", entryPath: "apps/auth-app/app" },
+ *     resource: { framework: "generic", entryPath: "apps/resource-server/app/routes.ts" }
+ *   }
+ * - baseDir: "/work/call-liner"
+ *
+ * 出力例:
+ * - entries: Map([["client", ["/work/call-liner/apps/auth-app/app/root.tsx", "/work/call-liner/apps/auth-app/app/routes/_index.tsx"]]])
+ * - routesByEntry: { client: [{ routeId: "_index", routePath: "/", sourcePath: "/work/call-liner/apps/auth-app/app/routes/_index.tsx" }] }
+ */
+async function resolveEntriesWithFramework(
+  entryDefinitions: Array<{
+    entryType: string;
+    framework: Parameters<typeof createFrameworkEntryStrategy>[0];
+    entryPath: string;
+  }>,
+  baseDir: string,
+): Promise<{
+  entries: Map<string, string[]>;
+  routesByEntry: Record<string, EnumeratedRoute[]>;
+}> {
+  const entries = new Map<string, string[]>();
+  const routesByEntry: Record<string, EnumeratedRoute[]> = {};
+
+  for (const entryDefinition of entryDefinitions) {
+    const strategy = createFrameworkEntryStrategy(entryDefinition.framework);
+    const resolvedEntries = await strategy.resolveEntryPaths(
+      entryDefinition.entryPath,
+      baseDir,
+    );
+    const routes = await strategy.enumerateRoutes(entryDefinition.entryPath, baseDir);
+    entries.set(entryDefinition.entryType, resolvedEntries);
+
+    // ルート列挙結果が空の framework では不要な JSON ノイズを避ける。
+    if (routes.length > 0) {
+      routesByEntry[entryDefinition.entryType] = routes;
+    }
+  }
+
+  return {
+    entries,
+    routesByEntry,
+  };
+}
+
+/**
  * CLI 引数を解釈してレポート出力を実行する。
  *
  * 入力例:
@@ -190,14 +243,31 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   await mkdir(outputDir, { recursive: true });
-  const entries = new Map<string, string[]>([
-    ["client", [options.clientEntry]],
-  ]);
+  const entryDefinitions: Array<{
+    entryType: string;
+    framework: Parameters<typeof createFrameworkEntryStrategy>[0];
+    entryPath: string;
+  }> = [
+    {
+      entryType: "client",
+      framework: options.clientFramework,
+      entryPath: options.clientEntry,
+    },
+  ];
 
   // resource 指定があるときのみ resource 側エントリーを追加する。
   if (options.resourceEntry) {
-    entries.set("resource", [options.resourceEntry]);
+    entryDefinitions.push({
+      entryType: "resource",
+      framework: options.resourceFramework,
+      entryPath: options.resourceEntry,
+    });
   }
+
+  const { entries, routesByEntry } = await resolveEntriesWithFramework(
+    entryDefinitions,
+    baseDir,
+  );
 
   const reports = await collectEntryAstReports({
     entries,
@@ -240,6 +310,10 @@ export async function run(argv: string[]): Promise<void> {
         outputAstJson: options.outputAstJson,
         clientEntry: options.clientEntry,
         resourceEntry: options.resourceEntry,
+        clientFramework: options.clientFramework,
+        resourceFramework: options.resourceFramework,
+        resolvedEntries: toEntriesObject(entries),
+        routesByEntry,
         writtenFiles: buildWrittenFilesByEntry(
           entries,
           writtenFiles,
