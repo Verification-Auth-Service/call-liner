@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { v4 as uuidv4 } from "uuid";
 
 export type AstJsonNode = {
   kind: string;
@@ -8,6 +9,8 @@ export type AstJsonNode = {
   literalValue?: string | number | boolean | null;
   type?: string;
   children: AstJsonNode[];
+  uniqueId: string;
+  fileName: string;
 };
 
 function toLiteralValue(node: ts.Node): string | number | boolean | null | undefined {
@@ -69,6 +72,8 @@ function toAstJsonNode(
     literalValue,
     type,
     children,
+    uniqueId: uuidv4(),
+    fileName: sourceFile.fileName,
   };
 }
 
