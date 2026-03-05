@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import AstMethods from "./ast-json-methods";
 import { type AstJsonNode, programToAstJson } from "./program-to-ast-json";
@@ -38,5 +41,53 @@ describe("AstMethods", () => {
     expect(
       AstMethods.getChild(root, AstMethods.getChildCount(root)),
     ).toBeNull();
+  });
+
+  it("resolves aliased import symbols to declarations in another file", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+
+    try {
+      const libPath = path.join(tempRoot, "lib.ts");
+      const mainPath = path.join(tempRoot, "main.ts");
+      await writeFile(libPath, "export const x = 10;", "utf8");
+      const root = programToAstJson(
+        'import { x as importedX } from "./lib";\nconsole.log(importedX);',
+        mainPath,
+      );
+      const nodes = collectNodes(root);
+      const importedIdentifier = nodes.find(
+        (node) => node.kind === "Identifier" && node.text === "importedX",
+      );
+
+      expect(importedIdentifier).toBeDefined();
+      expect(AstMethods.getSymbolName(importedIdentifier!)).toBe("importedX");
+      expect(AstMethods.getResolvedSymbolName(importedIdentifier!)).toBe("x");
+      expect(AstMethods.getDeclarationFileName(importedIdentifier!)).toBe(
+        libPath,
+      );
+      expect(AstMethods.getDeclarationPos(importedIdentifier!)).toBeTypeOf(
+        "number",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined symbol metadata when identifier cannot be resolved", () => {
+    const root = programToAstJson("console.log(missingValue);", "sample.ts");
+    const nodes = collectNodes(root);
+    const unresolvedIdentifier = nodes.find(
+      (node) => node.kind === "Identifier" && node.text === "missingValue",
+    );
+
+    expect(unresolvedIdentifier).toBeDefined();
+    expect(AstMethods.getSymbolName(unresolvedIdentifier!)).toBeUndefined();
+    expect(
+      AstMethods.getResolvedSymbolName(unresolvedIdentifier!),
+    ).toBeUndefined();
+    expect(
+      AstMethods.getDeclarationFileName(unresolvedIdentifier!),
+    ).toBeUndefined();
+    expect(AstMethods.getDeclarationPos(unresolvedIdentifier!)).toBeUndefined();
   });
 });

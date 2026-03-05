@@ -1,6 +1,7 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { programToAstJson } from "../ast/program-to-ast-json";
+import ts from "typescript";
+import { programToAstJson, sourceFileToAstJson } from "../ast/program-to-ast-json";
 
 type WriteEntryAstReportsOptions = {
   entries: Map<string, string[]>;
@@ -99,6 +100,45 @@ function toReportRelativePathForSource(
   return path.relative(baseDir, sourcePath);
 }
 
+function resolveCompilerOptions(baseDir: string): ts.CompilerOptions {
+  const defaultOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    skipLibCheck: true,
+    allowJs: true,
+  };
+  const configPath = ts.findConfigFile(baseDir, ts.sys.fileExists, "tsconfig.json");
+
+  // tsconfig が無い環境でも解析を継続するためデフォルトへフォールバックする。
+  if (!configPath) {
+    return defaultOptions;
+  }
+
+  const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+
+  // 読み込み失敗時は失敗させず、最小オプションで Program を生成する。
+  if (configFile.error) {
+    return defaultOptions;
+  }
+
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    path.dirname(configPath),
+    {},
+    configPath,
+  );
+
+  return {
+    ...defaultOptions,
+    ...parsed.options,
+    // 入力拡張子セットに .js/.jsx があるため、常に JS 解析を有効化する。
+    allowJs: true,
+    skipLibCheck: true,
+  };
+}
+
 /**
  * エントリーファイル群を AST(JSON) として `report` 配下に保存する。
  *
@@ -115,6 +155,8 @@ export async function writeEntryAstReports(
   options: WriteEntryAstReportsOptions,
 ): Promise<Map<string, string>> {
   const fileWritePaths = new Map<string, string>();
+  const sourceEntries: Array<{ sourcePath: string; entryPath: string }> = [];
+  const sourcePathSet = new Set<string>();
 
   for (const [, entryPaths] of options.entries) {
     for (const entryPath of entryPaths) {
@@ -124,16 +166,47 @@ export async function writeEntryAstReports(
       const sourcePaths = await collectProgramFiles(sourceRootPath);
 
       for (const sourcePath of sourcePaths) {
-        const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
-        const reportPath = path.join(options.outputDir, reportRelativePath);
-        const sourceCode = await readFile(sourcePath, "utf8");
-        const astTree = programToAstJson(sourceCode, sourcePath);
-
-        await mkdir(path.dirname(reportPath), { recursive: true });
-        await writeFile(reportPath, JSON.stringify(astTree, null, 2), "utf8");
-        fileWritePaths.set(sourcePath, reportPath);
+        sourceEntries.push({ sourcePath, entryPath });
+        sourcePathSet.add(sourcePath);
       }
     }
   }
+
+  const compilerOptions = resolveCompilerOptions(options.baseDir);
+  const sourcePathList = [...sourcePathSet];
+  const program = ts.createProgram(sourcePathList, compilerOptions);
+  const checker = program.getTypeChecker();
+
+  for (const { sourcePath, entryPath } of sourceEntries) {
+    const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
+    const reportPath = path.join(options.outputDir, reportRelativePath);
+    const sourceFile = program.getSourceFile(sourcePath);
+    const astTree = (() => {
+      // Program に含まれる場合はプロジェクト全体の型文脈で AST を生成する。
+      if (sourceFile) {
+        return sourceFileToAstJson(sourceFile, checker);
+      }
+
+      // 何らかの理由で Program 生成に失敗したファイルは単体解析へフォールバックする。
+      return programToAstJson(readFileSyncForFallback(sourcePath), sourcePath);
+    })();
+
+    await mkdir(path.dirname(reportPath), { recursive: true });
+    await writeFile(reportPath, JSON.stringify(astTree, null, 2), "utf8");
+    fileWritePaths.set(sourcePath, reportPath);
+  }
+
   return fileWritePaths;
+}
+
+function readFileSyncForFallback(sourcePath: string): string {
+  // Program から落ちたファイルでも最終的なレポートは生成する。
+  const content = ts.sys.readFile(sourcePath);
+
+  // readFile が undefined を返すケースは空文字列で継続して処理全体停止を避ける。
+  if (content === undefined) {
+    return "";
+  }
+
+  return content;
 }

@@ -8,6 +8,10 @@ export type AstJsonNode = {
   text?: string;
   literalValue?: string | number | boolean | null;
   type?: string;
+  symbolName?: string;
+  resolvedSymbolName?: string;
+  declarationFileName?: string;
+  declarationPos?: number;
   children: AstJsonNode[];
   uniqueId: string;
   fileName: string;
@@ -55,6 +59,49 @@ function toNodeType(
   }
 }
 
+function toSymbolInfo(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+):
+  | {
+      symbolName?: string;
+      resolvedSymbolName?: string;
+      declarationFileName?: string;
+      declarationPos?: number;
+    }
+  | undefined {
+  // 識別子以外はシンボル解決対象ではないため早期終了する。
+  if (!ts.isIdentifier(node)) {
+    return undefined;
+  }
+
+  try {
+    const symbol = checker.getSymbolAtLocation(node);
+
+    // 未解決識別子は情報を持たないノードとして扱う。
+    if (!symbol) {
+      return undefined;
+    }
+
+    const resolvedSymbol =
+      // import alias は実体シンボルへ辿ってから宣言位置を記録する。
+      symbol.flags & ts.SymbolFlags.Alias
+        ? checker.getAliasedSymbol(symbol)
+        : symbol;
+    const declaration = resolvedSymbol.declarations?.[0];
+
+    return {
+      symbolName: symbol.getName(),
+      resolvedSymbolName: resolvedSymbol.getName(),
+      declarationFileName: declaration?.getSourceFile().fileName,
+      declarationPos: declaration?.pos,
+    };
+  } catch {
+    // シンボル取得不可ノードは report 生成を止めず、シンボル情報なしで継続する。
+    return undefined;
+  }
+}
+
 function toAstJsonNode(
   node: ts.Node,
   sourceFile: ts.SourceFile,
@@ -67,6 +114,7 @@ function toAstJsonNode(
 
   const literalValue = toLiteralValue(node);
   const type = toNodeType(node, checker);
+  const symbolInfo = toSymbolInfo(node, checker);
   const text = children.length === 0 ? node.getText(sourceFile) : undefined;
 
   return {
@@ -76,6 +124,10 @@ function toAstJsonNode(
     text,
     literalValue,
     type,
+    symbolName: symbolInfo?.symbolName,
+    resolvedSymbolName: symbolInfo?.resolvedSymbolName,
+    declarationFileName: symbolInfo?.declarationFileName,
+    declarationPos: symbolInfo?.declarationPos,
     children,
     uniqueId: (() => {
       // kind/pos/end/fileName でhash化
@@ -84,6 +136,23 @@ function toAstJsonNode(
     })(),
     fileName: sourceFile.fileName,
   };
+}
+
+/**
+ * TypeScript の SourceFile と TypeChecker から AST の木構造 JSON に変換する。
+ *
+ * 入力例:
+ * - sourceFile: program.getSourceFile("/work/src/main.ts")
+ * - checker: program.getTypeChecker()
+ *
+ * 出力例:
+ * - { kind: "SourceFile", children: [{ kind: "ImportDeclaration", ... }], ... }
+ */
+export function sourceFileToAstJson(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): AstJsonNode {
+  return toAstJsonNode(sourceFile, sourceFile, checker);
 }
 
 /**
@@ -155,5 +224,5 @@ export function programToAstJson(
   const sourceFile = program.getSourceFile(fileName) ?? inMemorySourceFile;
   const checker = program.getTypeChecker();
 
-  return toAstJsonNode(sourceFile, sourceFile, checker);
+  return sourceFileToAstJson(sourceFile, checker);
 }

@@ -177,6 +177,64 @@ describe("writeEntryAstReports", () => {
     }
   });
 
+  it("resolves path-alias imports with tsconfig in project-level Program", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+
+    try {
+      await writeFile(
+        path.join(tempRoot, "tsconfig.json"),
+        JSON.stringify(
+          {
+            compilerOptions: {
+              baseUrl: ".",
+              moduleResolution: "Bundler",
+              paths: {
+                "@/*": ["src/*"],
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+
+      const entryDir = path.join("src");
+      const mainPath = path.join(tempRoot, "src", "main.ts");
+      const libPath = path.join(tempRoot, "src", "lib.ts");
+      await mkdir(path.dirname(mainPath), { recursive: true });
+      await writeFile(libPath, "export const value = 42;", "utf8");
+      await writeFile(
+        mainPath,
+        'import { value as importedValue } from "@/lib";\nconsole.log(importedValue);',
+        "utf8",
+      );
+
+      const outputDir = path.join(tempRoot, "report");
+      await writeEntryAstReports({
+        entries: new Map([["resource", [entryDir]]]),
+        outputDir,
+        baseDir: tempRoot,
+      });
+
+      const reportPath = path.join(outputDir, "src/main.ts.json");
+      const reportRaw = await readFile(reportPath, "utf8");
+      const reportTree = JSON.parse(reportRaw) as AstJsonNode;
+      const collectNodes = (node: AstJsonNode): AstJsonNode[] => {
+        return [node, ...node.children.flatMap(collectNodes)];
+      };
+      const importedIdentifier = collectNodes(reportTree).find(
+        (node) => node.kind === "Identifier" && node.text === "importedValue",
+      );
+
+      expect(importedIdentifier?.symbolName).toBe("importedValue");
+      expect(importedIdentifier?.resolvedSymbolName).toBe("value");
+      expect(importedIdentifier?.declarationFileName).toBe(libPath);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("throws when an entry file does not exist", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
 

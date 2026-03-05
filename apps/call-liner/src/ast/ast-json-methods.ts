@@ -32,6 +32,26 @@ class AstMethods {
     return node.type;
   }
 
+  // 識別子ノードのシンボル名（取得できない場合は undefined）
+  static getSymbolName(node: AstJsonNode): string | undefined {
+    return node.symbolName;
+  }
+
+  // import alias 解決後のシンボル名（取得できない場合は undefined）
+  static getResolvedSymbolName(node: AstJsonNode): string | undefined {
+    return node.resolvedSymbolName;
+  }
+
+  // 解決された宣言のファイル名（取得できない場合は undefined）
+  static getDeclarationFileName(node: AstJsonNode): string | undefined {
+    return node.declarationFileName;
+  }
+
+  // 解決された宣言ノードの位置（取得できない場合は undefined）
+  static getDeclarationPos(node: AstJsonNode): number | undefined {
+    return node.declarationPos;
+  }
+
   // ノードのリテラル値（数値、文字列、真偽値、null のいずれか。リテラルでない場合は undefined）
   static getLiteralValue(
     node: AstJsonNode,
