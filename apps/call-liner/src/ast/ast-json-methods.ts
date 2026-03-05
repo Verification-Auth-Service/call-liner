@@ -1,6 +1,6 @@
 import type { AstJsonNode } from "./program-to-ast-json";
 
-class ASTJsonMethods {
+class AstMethods {
   // root
   constructor() {}
 
@@ -50,4 +50,4 @@ class ASTJsonMethods {
   }
 }
 
-export default ASTJsonMethods;
+export default AstMethods;
