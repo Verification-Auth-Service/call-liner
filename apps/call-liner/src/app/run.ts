@@ -3,7 +3,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseCliArgs } from "../cli/parse-cli-args";
 import { promptDeleteOutputDir } from "../cli/prompt-delete-output-dir";
-import type { EntryAstJson, EntryAstJsonReport } from "./process-entry-ast-json";
+import type {
+  EntryAstJson,
+  EntryAstJsonReport,
+} from "./process-entry-ast-json";
 import {
   collectEntryAstReports,
   writeCollectedAstReports,

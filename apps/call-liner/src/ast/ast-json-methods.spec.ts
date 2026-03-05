@@ -68,10 +68,12 @@ describe("AstMethods", () => {
       expect(AstMethods.getDeclarationPos(importedIdentifier!)).toBeTypeOf(
         "number",
       );
-      expect(AstMethods.getSymbolResolution(importedIdentifier!)).toBeUndefined();
-      expect(AstMethods.getSymbolResolutionHash(importedIdentifier!)).toBeTypeOf(
-        "string",
-      );
+      expect(
+        AstMethods.getSymbolResolution(importedIdentifier!),
+      ).toBeUndefined();
+      expect(
+        AstMethods.getSymbolResolutionHash(importedIdentifier!),
+      ).toBeTypeOf("string");
       const sharedResolutions = AstMethods.getSymbolResolutionByHash(root);
       expect(sharedResolutions).toBeDefined();
       expect(
@@ -95,7 +97,9 @@ describe("AstMethods", () => {
     expect(
       AstMethods.getSymbolResolution(declarationIdentifier!)?.path[0]?.phase,
     ).toBe("lookup");
-    expect(AstMethods.getSymbolResolutionHash(declarationIdentifier!)).toBeUndefined();
+    expect(
+      AstMethods.getSymbolResolutionHash(declarationIdentifier!),
+    ).toBeUndefined();
   });
 
   it("returns undefined symbol metadata when identifier cannot be resolved", () => {

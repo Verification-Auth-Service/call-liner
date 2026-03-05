@@ -2,7 +2,10 @@ import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AstJsonNode } from "../ast/program-to-ast-json";
 import ts from "typescript";
-import { programToAstJson, sourceFileToAstJson } from "../ast/program-to-ast-json";
+import {
+  programToAstJson,
+  sourceFileToAstJson,
+} from "../ast/program-to-ast-json";
 
 type WriteEntryAstReportsOptions = {
   entries: Map<string, string[]>;
@@ -121,7 +124,11 @@ function resolveCompilerOptions(baseDir: string): ts.CompilerOptions {
     skipLibCheck: true,
     allowJs: true,
   };
-  const configPath = ts.findConfigFile(baseDir, ts.sys.fileExists, "tsconfig.json");
+  const configPath = ts.findConfigFile(
+    baseDir,
+    ts.sys.fileExists,
+    "tsconfig.json",
+  );
 
   // tsconfig が無い環境でも解析を継続するためデフォルトへフォールバックする。
   if (!configPath) {
@@ -200,6 +207,8 @@ export async function collectEntryAstReports(
       return programToAstJson(readFileSyncForFallback(sourcePath), sourcePath);
     })();
 
+    console.log(`Collected AST for ${sourcePath} (entry: ${entryPath})`);
+
     return {
       sourcePath,
       entryPath,
@@ -228,7 +237,11 @@ export async function writeCollectedAstReports(
   for (const report of reports) {
     const reportPath = path.join(outputDir, report.reportRelativePath);
     await mkdir(path.dirname(reportPath), { recursive: true });
-    await writeFile(reportPath, JSON.stringify(report.astTree, null, 2), "utf8");
+    await writeFile(
+      reportPath,
+      JSON.stringify(report.astTree, null, 2),
+      "utf8",
+    );
     fileWritePaths.set(report.sourcePath, reportPath);
   }
 

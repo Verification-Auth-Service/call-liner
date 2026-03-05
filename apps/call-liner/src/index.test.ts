@@ -331,9 +331,12 @@ describe("run", () => {
         "utf8",
       );
 
-      await mkdir(path.join(tempRoot, "apps", "resource-server", "app", "api"), {
-        recursive: true,
-      });
+      await mkdir(
+        path.join(tempRoot, "apps", "resource-server", "app", "api"),
+        {
+          recursive: true,
+        },
+      );
       await writeFile(
         path.join(tempRoot, resourceEntry, "routes.ts"),
         "export const routes = [];",
