@@ -238,6 +238,13 @@ describe("writeEntryAstReports", () => {
       expect(importedIdentifier?.symbolName).toBe("importedValue");
       expect(importedIdentifier?.resolvedSymbolName).toBe("value");
       expect(importedIdentifier?.declarationFileName).toBe(libPath);
+      expect(importedIdentifier?.symbolResolution).toBeUndefined();
+      expect(importedIdentifier?.symbolResolutionHash).toBeTypeOf("string");
+      expect(
+        reportTree.symbolResolutionByHash?.[
+          importedIdentifier?.symbolResolutionHash as string
+        ]?.path.some((step) => step.phase === "resolveAlias"),
+      ).toBe(true);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

@@ -10,11 +10,29 @@ export type AstJsonNode = {
   type?: string;
   symbolName?: string;
   resolvedSymbolName?: string;
+  symbolResolution?: SymbolResolutionInfo;
+  symbolResolutionHash?: string;
+  symbolResolutionByHash?: Record<string, SymbolResolutionInfo>;
   declarationFileName?: string;
   declarationPos?: number;
   children: AstJsonNode[];
   uniqueId: string;
   fileName: string;
+};
+
+export type SymbolResolutionPathStep = {
+  // lookup: シンボルテーブルからの名前解決、
+  // resolveAlias: エイリアス解決、
+  // declaration: 宣言位置特定
+  phase: "lookup" | "resolveAlias" | "declaration";
+  symbolName: string;
+  declarationFileName?: string;
+  declarationPos?: number;
+};
+
+export type SymbolResolutionInfo = {
+  hash: string;
+  path: SymbolResolutionPathStep[];
 };
 
 function toLiteralValue(
@@ -66,6 +84,7 @@ function toSymbolInfo(
   | {
       symbolName?: string;
       resolvedSymbolName?: string;
+      symbolResolution?: SymbolResolutionInfo;
       declarationFileName?: string;
       declarationPos?: number;
     }
@@ -89,10 +108,39 @@ function toSymbolInfo(
         ? checker.getAliasedSymbol(symbol)
         : symbol;
     const declaration = resolvedSymbol.declarations?.[0];
+    const symbolResolutionPath: SymbolResolutionPathStep[] = [
+      {
+        phase: "lookup",
+        symbolName: symbol.getName(),
+      },
+    ];
+
+    // alias でない識別子は lookup のみで解決されるため、別フェーズは追加しない。
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbolResolutionPath.push({
+        phase: "resolveAlias",
+        symbolName: resolvedSymbol.getName(),
+      });
+    }
+
+    // 宣言位置が取れる場合のみ declaration フェーズを追加して経路を明示する。
+    if (declaration) {
+      symbolResolutionPath.push({
+        phase: "declaration",
+        symbolName: resolvedSymbol.getName(),
+        declarationFileName: declaration.getSourceFile().fileName,
+        declarationPos: declaration.pos,
+      });
+    }
+    const symbolResolution = {
+      hash: hashString(JSON.stringify(symbolResolutionPath)),
+      path: symbolResolutionPath,
+    };
 
     return {
       symbolName: symbol.getName(),
       resolvedSymbolName: resolvedSymbol.getName(),
+      symbolResolution,
       declarationFileName: declaration?.getSourceFile().fileName,
       declarationPos: declaration?.pos,
     };
@@ -126,6 +174,7 @@ function toAstJsonNode(
     type,
     symbolName: symbolInfo?.symbolName,
     resolvedSymbolName: symbolInfo?.resolvedSymbolName,
+    symbolResolution: symbolInfo?.symbolResolution,
     declarationFileName: symbolInfo?.declarationFileName,
     declarationPos: symbolInfo?.declarationPos,
     children,
@@ -136,6 +185,87 @@ function toAstJsonNode(
     })(),
     fileName: sourceFile.fileName,
   };
+}
+
+function collectSymbolResolutionUsage(
+  root: AstJsonNode,
+): Map<string, { count: number; info: SymbolResolutionInfo }> {
+  const usageByHash = new Map<
+    string,
+    { count: number; info: SymbolResolutionInfo }
+  >();
+  const nodes = [root];
+
+  while (nodes.length > 0) {
+    const current = nodes.pop();
+
+    // pop の戻り値は undefined の可能性があるため安全側でスキップする。
+    if (!current) {
+      continue;
+    }
+
+    const resolution = current.symbolResolution;
+
+    // シンボル解決情報を持たないノードは集計対象外。
+    if (resolution) {
+      const existing = usageByHash.get(resolution.hash);
+
+      // 初出ハッシュは count=1 で追加し、同値情報への参照を保持する。
+      if (!existing) {
+        usageByHash.set(resolution.hash, {
+          count: 1,
+          info: resolution,
+        });
+      } else {
+        existing.count += 1;
+      }
+    }
+
+    nodes.push(...current.children);
+  }
+
+  return usageByHash;
+}
+
+function optimizeSymbolResolutionStorage(root: AstJsonNode): AstJsonNode {
+  const usageByHash = collectSymbolResolutionUsage(root);
+  const sharedInfoByHash: Record<string, SymbolResolutionInfo> = {};
+  const nodes = [root];
+
+  while (nodes.length > 0) {
+    const current = nodes.pop();
+
+    // pop の戻り値は undefined の可能性があるため安全側でスキップする。
+    if (!current) {
+      continue;
+    }
+
+    const resolution = current.symbolResolution;
+
+    // 解決情報を持たないノードは変換不要。
+    if (resolution) {
+      const usage = usageByHash.get(resolution.hash);
+
+      // 使用回数 1 の情報はノード直下に残して読みやすさを優先する。
+      if (usage && usage.count === 1) {
+        current.symbolResolutionHash = undefined;
+      } else if (usage) {
+        // 複数利用情報は root 側ハッシュ辞書へ集約し、ノードは hash 参照のみ保持する。
+        sharedInfoByHash[resolution.hash] = usage.info;
+        current.symbolResolutionHash = resolution.hash;
+        current.symbolResolution = undefined;
+      }
+    }
+
+    nodes.push(...current.children);
+  }
+
+  // 共有対象がある場合のみ root に辞書を付与し、JSON ノイズを増やさない。
+  if (Object.keys(sharedInfoByHash).length > 0) {
+    root.symbolResolutionByHash = sharedInfoByHash;
+  }
+
+  return root;
 }
 
 /**
@@ -152,7 +282,9 @@ export function sourceFileToAstJson(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
 ): AstJsonNode {
-  return toAstJsonNode(sourceFile, sourceFile, checker);
+  return optimizeSymbolResolutionStorage(
+    toAstJsonNode(sourceFile, sourceFile, checker),
+  );
 }
 
 /**

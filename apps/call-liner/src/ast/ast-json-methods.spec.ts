@@ -68,9 +68,34 @@ describe("AstMethods", () => {
       expect(AstMethods.getDeclarationPos(importedIdentifier!)).toBeTypeOf(
         "number",
       );
+      expect(AstMethods.getSymbolResolution(importedIdentifier!)).toBeUndefined();
+      expect(AstMethods.getSymbolResolutionHash(importedIdentifier!)).toBeTypeOf(
+        "string",
+      );
+      const sharedResolutions = AstMethods.getSymbolResolutionByHash(root);
+      expect(sharedResolutions).toBeDefined();
+      expect(
+        sharedResolutions?.[
+          AstMethods.getSymbolResolutionHash(importedIdentifier!) as string
+        ]?.path.some((step) => step.phase === "resolveAlias"),
+      ).toBe(true);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("stores symbol resolution path inline when only used once", () => {
+    const root = programToAstJson("const value = 1;");
+    const nodes = collectNodes(root);
+    const declarationIdentifier = nodes.find(
+      (node) => node.kind === "Identifier" && node.text === "value",
+    );
+
+    expect(declarationIdentifier).toBeDefined();
+    expect(
+      AstMethods.getSymbolResolution(declarationIdentifier!)?.path[0]?.phase,
+    ).toBe("lookup");
+    expect(AstMethods.getSymbolResolutionHash(declarationIdentifier!)).toBeUndefined();
   });
 
   it("returns undefined symbol metadata when identifier cannot be resolved", () => {

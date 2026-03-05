@@ -1,4 +1,4 @@
-import type { AstJsonNode } from "./program-to-ast-json";
+import type { AstJsonNode, SymbolResolutionInfo } from "./program-to-ast-json";
 
 class AstMethods {
   // root
@@ -40,6 +40,25 @@ class AstMethods {
   // import alias 解決後のシンボル名（取得できない場合は undefined）
   static getResolvedSymbolName(node: AstJsonNode): string | undefined {
     return node.resolvedSymbolName;
+  }
+
+  // シンボル解決経路（単発利用時はノード直下、複数利用時は undefined）
+  static getSymbolResolution(
+    node: AstJsonNode,
+  ): SymbolResolutionInfo | undefined {
+    return node.symbolResolution;
+  }
+
+  // シンボル解決経路のハッシュ参照（複数利用時のみ）
+  static getSymbolResolutionHash(node: AstJsonNode): string | undefined {
+    return node.symbolResolutionHash;
+  }
+
+  // 共有されたシンボル解決経路辞書（通常は SourceFile ルートのみ）
+  static getSymbolResolutionByHash(
+    node: AstJsonNode,
+  ): Record<string, SymbolResolutionInfo> | undefined {
+    return node.symbolResolutionByHash;
   }
 
   // 解決された宣言のファイル名（取得できない場合は undefined）
