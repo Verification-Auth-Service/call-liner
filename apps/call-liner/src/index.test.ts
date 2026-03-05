@@ -14,6 +14,7 @@ describe("parseCliArgs", () => {
     expect(
       parseCliArgs([
         "-d",
+        "--ast-json",
         "--client-entry",
         "/tmp/client.tsx",
         "--resource-entry",
@@ -21,6 +22,7 @@ describe("parseCliArgs", () => {
       ]),
     ).toEqual({
       debug: true,
+      outputAstJson: true,
       clientEntry: "/tmp/client.tsx",
       resourceEntry: "/tmp/resource.ts",
     });
@@ -29,6 +31,7 @@ describe("parseCliArgs", () => {
   it("parses client-entry only", () => {
     expect(parseCliArgs(["--client-entry", "/tmp/client.tsx"])).toEqual({
       debug: false,
+      outputAstJson: false,
       clientEntry: "/tmp/client.tsx",
       resourceEntry: undefined,
     });
@@ -311,7 +314,7 @@ describe("writeEntryAstReports", () => {
 });
 
 describe("run", () => {
-  it("writes entrypoints.json with report json files while preserving directory structure", async () => {
+  it("writes only entrypoints.json when debug output is disabled", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
     const previousInitCwd = process.env.INIT_CWD;
 
@@ -361,28 +364,9 @@ describe("run", () => {
         };
       };
 
-      expect(entrypoints.writtenFiles.client).toEqual({
-        apps: {
-          "auth-app": {
-            app: {
-              "root.tsx.json": "apps/auth-app/app/root.tsx.json",
-            },
-          },
-        },
-      });
-
-      expect(entrypoints.writtenFiles.resource).toEqual({
-        apps: {
-          "resource-server": {
-            app: {
-              "routes.ts.json": "apps/resource-server/app/routes.ts.json",
-              api: {
-                "health.ts.json": "apps/resource-server/app/api/health.ts.json",
-              },
-            },
-          },
-        },
-      });
+      expect(entrypoints.writtenFiles.client).toEqual({});
+      expect(entrypoints.writtenFiles.resource).toEqual({});
+      expect(existsSync(path.join(tempRoot, "report", "source"))).toBe(false);
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;
@@ -423,17 +407,101 @@ describe("run", () => {
         resourceEntry?: string;
       };
 
+      expect(entrypoints.writtenFiles.client).toEqual({});
+      expect(entrypoints.writtenFiles.resource).toBeUndefined();
+      expect(entrypoints.resourceEntry).toBeUndefined();
+    } finally {
+      if (previousInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previousInitCwd;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("writes source reports when debug mode is enabled", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+    const previousInitCwd = process.env.INIT_CWD;
+
+    try {
+      const clientEntry = path.join("apps", "auth-app", "app", "root.tsx");
+      await mkdir(path.join(tempRoot, "apps", "auth-app", "app"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, clientEntry),
+        "export const root = null;",
+        "utf8",
+      );
+
+      process.env.INIT_CWD = tempRoot;
+      await run(["-d", "--client-entry", clientEntry]);
+
+      const entrypointsRaw = await readFile(
+        path.join(tempRoot, "report", "entrypoints.json"),
+        "utf8",
+      );
+      const entrypoints = JSON.parse(entrypointsRaw) as {
+        writtenFiles: {
+          client: Record<string, unknown>;
+        };
+      };
+
       expect(entrypoints.writtenFiles.client).toEqual({
-        apps: {
-          "auth-app": {
-            app: {
-              "root.tsx.json": "apps/auth-app/app/root.tsx.json",
+        source: {
+          apps: {
+            "auth-app": {
+              app: {
+                "root.tsx.json": "source/apps/auth-app/app/root.tsx.json",
+              },
             },
           },
         },
       });
-      expect(entrypoints.writtenFiles.resource).toBeUndefined();
-      expect(entrypoints.resourceEntry).toBeUndefined();
+    } finally {
+      if (previousInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previousInitCwd;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("writes ast-data.json when --ast-json is enabled", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+    const previousInitCwd = process.env.INIT_CWD;
+
+    try {
+      const clientEntry = path.join("apps", "auth-app", "app", "root.tsx");
+      await mkdir(path.join(tempRoot, "apps", "auth-app", "app"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, clientEntry),
+        "export const root = null;",
+        "utf8",
+      );
+
+      process.env.INIT_CWD = tempRoot;
+      await run(["--ast-json", "--client-entry", clientEntry]);
+
+      const astDataRaw = await readFile(
+        path.join(tempRoot, "report", "ast-data.json"),
+        "utf8",
+      );
+      const astData = JSON.parse(astDataRaw) as {
+        version: number;
+        reports: Array<{ entryType: string; sourcePath: string }>;
+      };
+
+      expect(astData.version).toBe(1);
+      expect(astData.reports).toHaveLength(1);
+      expect(astData.reports[0]).toMatchObject({
+        entryType: "client",
+        sourcePath: path.join(tempRoot, clientEntry),
+      });
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;

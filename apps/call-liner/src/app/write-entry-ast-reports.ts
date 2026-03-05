@@ -1,5 +1,6 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { AstJsonNode } from "../ast/program-to-ast-json";
 import ts from "typescript";
 import { programToAstJson, sourceFileToAstJson } from "../ast/program-to-ast-json";
 
@@ -7,6 +8,18 @@ type WriteEntryAstReportsOptions = {
   entries: Map<string, string[]>;
   outputDir: string;
   baseDir: string;
+};
+
+type CollectEntryAstReportsOptions = {
+  entries: Map<string, string[]>;
+  baseDir: string;
+};
+
+export type CollectedAstReport = {
+  sourcePath: string;
+  entryPath: string;
+  reportRelativePath: string;
+  astTree: AstJsonNode;
 };
 
 const PROGRAM_FILE_EXTENSIONS = new Set([
@@ -140,21 +153,18 @@ function resolveCompilerOptions(baseDir: string): ts.CompilerOptions {
 }
 
 /**
- * エントリーファイル群を AST(JSON) として `report` 配下に保存する。
+ * エントリー配下の AST(JSON) をファイル書き込みせずに収集する。
  *
  * 入力例:
  * - entries: Map([["client", ["/tmp/auth/routes.ts"]], ["resource", ["apps/resource-server/app"]]])
- * - outputDir: "/work/call-liner/report"
  * - baseDir: "/work/call-liner"
  *
  * 出力例:
- * - "/work/call-liner/report/tmp/auth/routes.ts.json"
- * - "/work/call-liner/report/apps/resource-server/app/routes.ts.json"
+ * - [{ sourcePath: "/tmp/auth/routes.ts", entryPath: "/tmp/auth/routes.ts", reportRelativePath: "tmp/auth/routes.ts.json", astTree: {...} }]
  */
-export async function writeEntryAstReports(
-  options: WriteEntryAstReportsOptions,
-): Promise<Map<string, string>> {
-  const fileWritePaths = new Map<string, string>();
+export async function collectEntryAstReports(
+  options: CollectEntryAstReportsOptions,
+): Promise<CollectedAstReport[]> {
   const sourceEntries: Array<{ sourcePath: string; entryPath: string }> = [];
   const sourcePathSet = new Set<string>();
 
@@ -177,9 +187,8 @@ export async function writeEntryAstReports(
   const program = ts.createProgram(sourcePathList, compilerOptions);
   const checker = program.getTypeChecker();
 
-  for (const { sourcePath, entryPath } of sourceEntries) {
+  return sourceEntries.map(({ sourcePath, entryPath }) => {
     const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
-    const reportPath = path.join(options.outputDir, reportRelativePath);
     const sourceFile = program.getSourceFile(sourcePath);
     const astTree = (() => {
       // Program に含まれる場合はプロジェクト全体の型文脈で AST を生成する。
@@ -191,12 +200,62 @@ export async function writeEntryAstReports(
       return programToAstJson(readFileSyncForFallback(sourcePath), sourcePath);
     })();
 
+    return {
+      sourcePath,
+      entryPath,
+      reportRelativePath,
+      astTree,
+    };
+  });
+}
+
+/**
+ * 収集済み AST(JSON) を指定ディレクトリーへ書き込む。
+ *
+ * 入力例:
+ * - reports: [{ sourcePath: "/tmp/auth/routes.ts", reportRelativePath: "tmp/auth/routes.ts.json", astTree: {...} }]
+ * - outputDir: "/work/call-liner/report/source"
+ *
+ * 出力例:
+ * - Map { "/tmp/auth/routes.ts" => "/work/call-liner/report/source/tmp/auth/routes.ts.json" }
+ */
+export async function writeCollectedAstReports(
+  reports: CollectedAstReport[],
+  outputDir: string,
+): Promise<Map<string, string>> {
+  const fileWritePaths = new Map<string, string>();
+
+  for (const report of reports) {
+    const reportPath = path.join(outputDir, report.reportRelativePath);
     await mkdir(path.dirname(reportPath), { recursive: true });
-    await writeFile(reportPath, JSON.stringify(astTree, null, 2), "utf8");
-    fileWritePaths.set(sourcePath, reportPath);
+    await writeFile(reportPath, JSON.stringify(report.astTree, null, 2), "utf8");
+    fileWritePaths.set(report.sourcePath, reportPath);
   }
 
   return fileWritePaths;
+}
+
+/**
+ * エントリーファイル群を AST(JSON) として `report` 配下に保存する。
+ *
+ * 入力例:
+ * - entries: Map([["client", ["/tmp/auth/routes.ts"]], ["resource", ["apps/resource-server/app"]]])
+ * - outputDir: "/work/call-liner/report"
+ * - baseDir: "/work/call-liner"
+ *
+ * 出力例:
+ * - "/work/call-liner/report/tmp/auth/routes.ts.json"
+ * - "/work/call-liner/report/apps/resource-server/app/routes.ts.json"
+ */
+export async function writeEntryAstReports(
+  options: WriteEntryAstReportsOptions,
+): Promise<Map<string, string>> {
+  const reports = await collectEntryAstReports({
+    entries: options.entries,
+    baseDir: options.baseDir,
+  });
+
+  return writeCollectedAstReports(reports, options.outputDir);
 }
 
 function readFileSyncForFallback(sourcePath: string): string {

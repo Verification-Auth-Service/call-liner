@@ -3,10 +3,33 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseCliArgs } from "../cli/parse-cli-args";
 import { promptDeleteOutputDir } from "../cli/prompt-delete-output-dir";
-import { writeEntryAstReports } from "./write-entry-ast-reports";
+import type { EntryAstJson, EntryAstJsonReport } from "./process-entry-ast-json";
+import {
+  collectEntryAstReports,
+  writeCollectedAstReports,
+} from "./write-entry-ast-reports";
 
 interface WrittenFilesTree {
   [key: string]: WrittenFilesTree | string;
+}
+
+function resolveEntryType(
+  entries: Map<string, string[]>,
+  sourcePath: string,
+  baseDir: string,
+): string | undefined {
+  for (const [entryType, entryPaths] of entries.entries()) {
+    const matchedEntryPath = entryPaths.find((entryPath) =>
+      matchesEntryPath(sourcePath, resolveEntryPath(baseDir, entryPath)),
+    );
+
+    // sourcePath が含まれる entryType が見つかったら、それを採用する。
+    if (matchedEntryPath) {
+      return entryType;
+    }
+  }
+
+  return undefined;
 }
 
 function resolveEntryPath(baseDir: string, entryPath: string): string {
@@ -92,15 +115,53 @@ function buildWrittenFilesByEntry(
   return result;
 }
 
+function toEntryAstJsonReports(
+  entries: Map<string, string[]>,
+  reports: Array<{
+    sourcePath: string;
+    reportRelativePath: string;
+    astTree: EntryAstJsonReport["astTree"];
+  }>,
+  baseDir: string,
+): EntryAstJsonReport[] {
+  const result: EntryAstJsonReport[] = [];
+
+  for (const report of reports) {
+    const entryType = resolveEntryType(entries, report.sourcePath, baseDir);
+
+    // 想定外にエントリーへ紐付かない source は JSON 対象から除外する。
+    if (!entryType) {
+      continue;
+    }
+
+    result.push({
+      entryType,
+      sourcePath: report.sourcePath,
+      reportRelativePath: report.reportRelativePath,
+      astTree: report.astTree,
+    });
+  }
+
+  return result;
+}
+
+function toEntriesObject(
+  entries: Map<string, string[]>,
+): Record<string, string[]> {
+  return Object.fromEntries(entries);
+}
+
 /**
  * CLI 引数を解釈してレポート出力を実行する。
  *
  * 入力例:
- * - ["-d", "--client-entry", "/tmp/client.tsx", "--resource-entry", "apps/resource-server/app/routes.ts"]
+ * - ["-d", "--ast-json", "--client-entry", "/tmp/client.tsx", "--resource-entry", "apps/resource-server/app/routes.ts"]
  * - ["--client-entry", "/tmp/client.tsx"]
  *
  * 出力例:
- * - report/entrypoints.json と report 配下の AST(JSON) ファイルが生成される
+ * - report/entrypoints.json が生成される
+ * - `-d` 指定時のみ report/source 配下の AST(JSON) が生成される
+ * - `--ast-json` 指定時のみ report/ast-data.json が生成される
  */
 export async function run(argv: string[]): Promise<void> {
   const options = parseCliArgs(argv);
@@ -126,22 +187,46 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   await mkdir(outputDir, { recursive: true });
-  const entries = new Map<string, string[]>([["client", [options.clientEntry]]]);
+  const entries = new Map<string, string[]>([
+    ["client", [options.clientEntry]],
+  ]);
 
   // resource 指定があるときのみ resource 側エントリーを追加する。
   if (options.resourceEntry) {
     entries.set("resource", [options.resourceEntry]);
   }
 
-  const writtenFiles = await writeEntryAstReports({
+  const reports = await collectEntryAstReports({
     entries,
-    outputDir,
     baseDir,
   });
+  const writtenFiles = options.debug
+    ? await writeCollectedAstReports(reports, path.resolve(outputDir, "source"))
+    : new Map<string, string>();
+  const astDataReports = toEntryAstJsonReports(entries, reports, baseDir);
 
-  console.log(`生成されたファイル:`);
-  for (const file of writtenFiles.values()) {
-    console.log(`  - ${file}`);
+  // `--ast-json` 指定時だけ、後段処理向けの単一 JSON を保存する。
+  if (options.outputAstJson) {
+    const astData: EntryAstJson = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      baseDir,
+      entries: toEntriesObject(entries),
+      reports: astDataReports,
+    };
+
+    await writeFile(
+      path.join(outputDir, "ast-data.json"),
+      JSON.stringify(astData, null, 2),
+      "utf8",
+    );
+  }
+
+  if (writtenFiles.size > 0) {
+    console.log(`生成されたファイル:`);
+    for (const file of writtenFiles.values()) {
+      console.log(`  - ${file}`);
+    }
   }
 
   await writeFile(
@@ -149,6 +234,7 @@ export async function run(argv: string[]): Promise<void> {
     JSON.stringify(
       {
         debug: options.debug,
+        outputAstJson: options.outputAstJson,
         clientEntry: options.clientEntry,
         resourceEntry: options.resourceEntry,
         writtenFiles: buildWrittenFilesByEntry(
