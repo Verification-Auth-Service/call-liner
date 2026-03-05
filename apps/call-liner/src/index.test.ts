@@ -26,7 +26,15 @@ describe("parseCliArgs", () => {
     });
   });
 
-  it("throws when required entries are missing", () => {
+  it("parses client-entry only", () => {
+    expect(parseCliArgs(["--client-entry", "/tmp/client.tsx"])).toEqual({
+      debug: false,
+      clientEntry: "/tmp/client.tsx",
+      resourceEntry: undefined,
+    });
+  });
+
+  it("throws when client-entry is missing", () => {
     expect(() => parseCliArgs(["-d"])).toThrowError("使い方:");
   });
 });
@@ -325,6 +333,57 @@ describe("run", () => {
           },
         },
       });
+    } finally {
+      if (previousInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previousInitCwd;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("writes reports when only client-entry is provided", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
+    const previousInitCwd = process.env.INIT_CWD;
+
+    try {
+      const clientEntry = path.join("apps", "auth-app", "app", "root.tsx");
+      await mkdir(path.join(tempRoot, "apps", "auth-app", "app"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(tempRoot, clientEntry),
+        "export const root = null;",
+        "utf8",
+      );
+
+      process.env.INIT_CWD = tempRoot;
+      await run(["--client-entry", clientEntry]);
+
+      const entrypointsRaw = await readFile(
+        path.join(tempRoot, "report", "entrypoints.json"),
+        "utf8",
+      );
+      const entrypoints = JSON.parse(entrypointsRaw) as {
+        writtenFiles: {
+          client: Record<string, unknown>;
+          resource?: Record<string, unknown>;
+        };
+        resourceEntry?: string;
+      };
+
+      expect(entrypoints.writtenFiles.client).toEqual({
+        apps: {
+          "auth-app": {
+            app: {
+              "root.tsx.json": "apps/auth-app/app/root.tsx.json",
+            },
+          },
+        },
+      });
+      expect(entrypoints.writtenFiles.resource).toBeUndefined();
+      expect(entrypoints.resourceEntry).toBeUndefined();
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;

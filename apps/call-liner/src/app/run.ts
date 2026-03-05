@@ -97,6 +97,7 @@ function buildWrittenFilesByEntry(
  *
  * 入力例:
  * - ["-d", "--client-entry", "/tmp/client.tsx", "--resource-entry", "apps/resource-server/app/routes.ts"]
+ * - ["--client-entry", "/tmp/client.tsx"]
  *
  * 出力例:
  * - report/entrypoints.json と report 配下の AST(JSON) ファイルが生成される
@@ -125,10 +126,12 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   await mkdir(outputDir, { recursive: true });
-  const entries = new Map<string, string[]>([
-    ["client", [options.clientEntry]],
-    ["resource", [options.resourceEntry]],
-  ]);
+  const entries = new Map<string, string[]>([["client", [options.clientEntry]]]);
+
+  // resource 指定があるときのみ resource 側エントリーを追加する。
+  if (options.resourceEntry) {
+    entries.set("resource", [options.resourceEntry]);
+  }
 
   const writtenFiles = await writeEntryAstReports({
     entries,

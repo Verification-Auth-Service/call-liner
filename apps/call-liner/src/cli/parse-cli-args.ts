@@ -1,7 +1,7 @@
 export type CliOptions = {
   debug: boolean;
   clientEntry: string;
-  resourceEntry: string;
+  resourceEntry?: string;
 };
 
 /**
@@ -9,9 +9,11 @@ export type CliOptions = {
  *
  * 入力例:
  * - ["-d", "--client-entry", "/tmp/client.tsx", "--resource-entry", "/tmp/resource.ts"]
+ * - ["--client-entry", "/tmp/client.tsx"]
  *
  * 出力例:
  * - { debug: true, clientEntry: "/tmp/client.tsx", resourceEntry: "/tmp/resource.ts" }
+ * - { debug: false, clientEntry: "/tmp/client.tsx" }
  */
 export function parseCliArgs(argv: string[]): CliOptions {
   let debug = false;
@@ -42,12 +44,13 @@ export function parseCliArgs(argv: string[]): CliOptions {
     }
   }
 
-  // 必須引数が不足している場合は処理を続行できないため即時エラーにする。
-  if (!clientEntry || !resourceEntry) {
+  // クライアント側エントリーが無いと最低限の解析対象を決定できないため即時エラーにする。
+  if (!clientEntry) {
     throw new Error(
-      "使い方: tsx src/index.ts [-d] --client-entry <path> --resource-entry <path>",
+      "使い方: tsx src/index.ts [-d] --client-entry <path> [--resource-entry <path>]",
     );
   }
 
-  return { debug, clientEntry, resourceEntry };
+  // resource 指定は任意のため、空文字列は undefined に正規化して返す。
+  return { debug, clientEntry, resourceEntry: resourceEntry || undefined };
 }
