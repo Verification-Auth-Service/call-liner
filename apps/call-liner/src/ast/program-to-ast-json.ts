@@ -13,7 +13,9 @@ export type AstJsonNode = {
   fileName: string;
 };
 
-function toLiteralValue(node: ts.Node): string | number | boolean | null | undefined {
+function toLiteralValue(
+  node: ts.Node,
+): string | number | boolean | null | undefined {
   // 数値リテラルは JSON 側で比較・集計しやすいよう number として保持する。
   if (ts.isNumericLiteral(node)) {
     return Number(node.text);
@@ -40,7 +42,10 @@ function toLiteralValue(node: ts.Node): string | number | boolean | null | undef
   return undefined;
 }
 
-function toNodeType(node: ts.Node, checker: ts.TypeChecker): string | undefined {
+function toNodeType(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): string | undefined {
   try {
     const type = checker.getTypeAtLocation(node);
     return checker.typeToString(type, node, ts.TypeFormatFlags.NoTruncation);
@@ -107,7 +112,12 @@ export function programToAstJson(
   );
   const host: ts.CompilerHost = {
     ...defaultHost,
-    getSourceFile: (requestedFileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+    getSourceFile: (
+      requestedFileName,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    ) => {
       // 解析対象ファイルは常に引数のプログラム文字列を使い、ディスク内容との差異を排除する。
       if (requestedFileName === fileName) {
         return inMemorySourceFile;

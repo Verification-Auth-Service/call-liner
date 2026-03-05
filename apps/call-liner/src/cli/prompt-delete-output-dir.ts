@@ -1,6 +1,8 @@
 import { createInterface } from "node:readline/promises";
 
-export async function promptDeleteOutputDir(outputDir: string): Promise<boolean> {
+export async function promptDeleteOutputDir(
+  outputDir: string,
+): Promise<boolean> {
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,

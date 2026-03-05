@@ -18,7 +18,9 @@ export async function run(argv: string[]): Promise<void> {
   const options = parseCliArgs(argv);
 
   // pnpm 経由実行では INIT_CWD が起点ディレクトリになるため、相対パス解決の基準に使う。
-  const baseDir = process.env.INIT_CWD ? path.resolve(process.env.INIT_CWD) : process.cwd();
+  const baseDir = process.env.INIT_CWD
+    ? path.resolve(process.env.INIT_CWD)
+    : process.cwd();
   const outputDir = path.resolve(baseDir, "report");
 
   // 既存の出力先がある場合は、誤上書きを避けるために確認を挟む。

@@ -10,7 +10,15 @@ import { formatCallLine } from "./format/format-call-line";
 
 describe("parseCliArgs", () => {
   it("parses call-liner entry args", () => {
-    expect(parseCliArgs(["-d", "--client-entry", "/tmp/client.tsx", "--resource-entry", "/tmp/resource.ts"])).toEqual({
+    expect(
+      parseCliArgs([
+        "-d",
+        "--client-entry",
+        "/tmp/client.tsx",
+        "--resource-entry",
+        "/tmp/resource.ts",
+      ]),
+    ).toEqual({
       debug: true,
       clientEntry: "/tmp/client.tsx",
       resourceEntry: "/tmp/resource.ts",
@@ -27,11 +35,20 @@ describe("programToAstJson", () => {
     const tree = programToAstJson("const x = 1;");
     expect(tree.kind).toBe("SourceFile");
 
-    const statement = tree.children.find((node) => node.kind === "FirstStatement");
+    const statement = tree.children.find(
+      (node) => node.kind === "FirstStatement",
+    );
     expect(statement).toBeDefined();
-    expect(statement?.children.some((node) => node.kind === "VariableDeclarationList")).toBe(true);
+    expect(
+      statement?.children.some(
+        (node) => node.kind === "VariableDeclarationList",
+      ),
+    ).toBe(true);
 
-    const findByKind = (node: AstJsonNode, kind: string): AstJsonNode | undefined => {
+    const findByKind = (
+      node: AstJsonNode,
+      kind: string,
+    ): AstJsonNode | undefined => {
       // 深さ優先で探索し、最初に見つかった kind のノードを返す。
       if (node.kind === kind) {
         return node;
@@ -61,15 +78,30 @@ describe("writeEntryAstReports", () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-"));
 
     try {
-      const absoluteEntry = path.join(tempRoot, "external", "auth-app", "app", "routes.ts");
-      const relativeEntry = path.join("apps", "resource-server", "app", "routes.ts");
+      const absoluteEntry = path.join(
+        tempRoot,
+        "external",
+        "auth-app",
+        "app",
+        "routes.ts",
+      );
+      const relativeEntry = path.join(
+        "apps",
+        "resource-server",
+        "app",
+        "routes.ts",
+      );
 
       await mkdir(path.dirname(absoluteEntry), { recursive: true });
       await writeFile(absoluteEntry, "export const authRoutes = [];", "utf8");
 
       const relativeSourcePath = path.join(tempRoot, relativeEntry);
       await mkdir(path.dirname(relativeSourcePath), { recursive: true });
-      await writeFile(relativeSourcePath, "export const resourceRoutes = [];", "utf8");
+      await writeFile(
+        relativeSourcePath,
+        "export const resourceRoutes = [];",
+        "utf8",
+      );
 
       const outputDir = path.join(tempRoot, "report");
       await writeEntryAstReports({
@@ -102,9 +134,21 @@ describe("writeEntryAstReports", () => {
       const directoryEntry = path.join("apps", "resource-server", "app");
       const sourceDir = path.join(tempRoot, directoryEntry);
       await mkdir(path.join(sourceDir, "nested"), { recursive: true });
-      await writeFile(path.join(sourceDir, "routes.ts"), "export const routes = [];", "utf8");
-      await writeFile(path.join(sourceDir, "nested", "helper.tsx"), "export const helper = () => null;", "utf8");
-      await writeFile(path.join(sourceDir, "README.md"), "not a program file", "utf8");
+      await writeFile(
+        path.join(sourceDir, "routes.ts"),
+        "export const routes = [];",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceDir, "nested", "helper.tsx"),
+        "export const helper = () => null;",
+        "utf8",
+      );
+      await writeFile(
+        path.join(sourceDir, "README.md"),
+        "not a program file",
+        "utf8",
+      );
 
       const outputDir = path.join(tempRoot, "report");
       await writeEntryAstReports({
@@ -113,9 +157,17 @@ describe("writeEntryAstReports", () => {
         baseDir: tempRoot,
       });
 
-      expect(existsSync(path.join(outputDir, `${directoryEntry}/routes.ts.json`))).toBe(true);
-      expect(existsSync(path.join(outputDir, `${directoryEntry}/nested/helper.tsx.json`))).toBe(true);
-      expect(existsSync(path.join(outputDir, `${directoryEntry}/README.md.json`))).toBe(false);
+      expect(
+        existsSync(path.join(outputDir, `${directoryEntry}/routes.ts.json`)),
+      ).toBe(true);
+      expect(
+        existsSync(
+          path.join(outputDir, `${directoryEntry}/nested/helper.tsx.json`),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(path.join(outputDir, `${directoryEntry}/README.md.json`)),
+      ).toBe(false);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

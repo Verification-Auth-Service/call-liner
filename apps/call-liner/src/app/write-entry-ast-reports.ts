@@ -121,9 +121,7 @@ export async function writeEntryAstReports(
     const sourcePaths = await collectProgramFiles(sourceRootPath);
 
     for (const sourcePath of sourcePaths) {
-      const reportRelativePath = `${toSafeReportRelativePath(
-        toReportRelativePathForSource(sourcePath, entryPath, options.baseDir),
-      )}.json`;
+      const reportRelativePath = `${toSafeReportRelativePath(toReportRelativePathForSource(sourcePath, entryPath, options.baseDir))}.json`;
       const reportPath = path.join(options.outputDir, reportRelativePath);
       const sourceCode = await readFile(sourcePath, "utf8");
       const astTree = programToAstJson(sourceCode, sourcePath);
