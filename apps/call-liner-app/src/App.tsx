@@ -4,12 +4,12 @@ import type {
   AttackDslOperation,
   AttackDslReport,
   AttackDslScenario,
-  Phase4Flow,
+  TimelineFlow,
   TimelineBoard,
 } from "./domain-types";
 import {
   buildTimelineBoard,
-  derivePhase4Flows,
+  deriveTimelineFlows,
   parseActionSpaceReportText,
   parseAttackDslReportText,
 } from "./report-integration";
@@ -37,7 +37,7 @@ async function readTextFile(file: File): Promise<string> {
 }
 
 /**
- * Phase 1-4 統合結果をタイムラインで検証する GUI を表示する。
+ * 実験機能の統合結果をタイムラインで検証する GUI を表示する。
  * 入力例: `<App />`
  * 出力例: シナリオ選択、フロー検出、時間軸クリップ表示を含む React 画面。
  */
@@ -51,8 +51,8 @@ export default function App() {
   );
   const [parseError, setParseError] = useState<string>("");
 
-  const phase4Flows = useMemo(() => {
-    return derivePhase4Flows(actionSpaceReport);
+  const flows = useMemo(() => {
+    return deriveTimelineFlows(actionSpaceReport);
   }, [actionSpaceReport]);
 
   const selectedScenario: AttackDslScenario = useMemo(() => {
@@ -80,11 +80,11 @@ export default function App() {
     return found;
   }, [attackDslReport, selectedScenarioId]);
 
-  const selectedFlow: Phase4Flow | undefined = useMemo(() => {
-    return phase4Flows.find(
+  const selectedFlow: TimelineFlow | undefined = useMemo(() => {
+    return flows.find(
       (flow) => flow.callbackEntrypointId === selectedScenario.entrypointId,
     );
-  }, [phase4Flows, selectedScenario.entrypointId]);
+  }, [flows, selectedScenario.entrypointId]);
 
   const board: TimelineBoard = useMemo(() => {
     return buildTimelineBoard(selectedScenario, selectedFlow);
@@ -146,7 +146,7 @@ export default function App() {
         <div>
           <h1>Call Liner Timeline Lab</h1>
           <p>
-            Phase 1-4 を統合し、Operation を時間軸で検証する GUI
+            実験機能を統合し、Operation を時間軸で検証する GUI
           </p>
         </div>
         <div className="file-controls">
@@ -165,7 +165,7 @@ export default function App() {
 
       <section className="workspace-grid">
         <aside className="panel panel-scenarios" aria-label="scenario-list">
-          <h2>Scenarios (Phase 3)</h2>
+          <h2>Scenarios</h2>
           <ul>
             {attackDslReport.scenarios.map((scenario) => {
               const isActive = selectedScenarioId === scenario.id;
@@ -231,24 +231,13 @@ export default function App() {
                             left: clip.startMs * PIXELS_PER_MS,
                             width: (clip.endMs - clip.startMs) * PIXELS_PER_MS,
                           }}
-                          title={`${clip.phase}: ${clip.label}`}
+                          title={`${clip.category}: ${clip.label}`}
                         >
                           {clip.label}
                         </span>
                       );
                     })}
 
-                  {board.markers
-                    .filter((marker) => marker.laneId === lane.id)
-                    .map((marker) => {
-                      return (
-                        <span
-                          key={marker.id}
-                          className="marker"
-                          style={{ left: marker.atMs * PIXELS_PER_MS }}
-                        />
-                      );
-                    })}
                 </article>
               );
             })}
@@ -259,7 +248,7 @@ export default function App() {
           <h2>Inspector</h2>
           <p className="scenario-title">{selectedScenario.title}</p>
           <p>{selectedScenario.description}</p>
-          <h3>Operations (Phase 1/2)</h3>
+          <h3>Operations</h3>
           <ul className="operation-list">
             {selectedScenario.operations.map((operation, index) => {
               return (
@@ -272,14 +261,14 @@ export default function App() {
             })}
           </ul>
 
-          <h3>Expected Policies (Phase 3)</h3>
+          <h3>Expected Policies</h3>
           <div className="policy-tags">
             {selectedScenario.expectedPolicyIds.map((policyId) => (
               <span key={policyId}>{policyId}</span>
             ))}
           </div>
 
-          <h3>Two-Step Flow (Phase 4)</h3>
+          <h3>Authorize + Callback Flow</h3>
           {selectedFlow ? (
             <p>
               {selectedFlow.authorizePath}

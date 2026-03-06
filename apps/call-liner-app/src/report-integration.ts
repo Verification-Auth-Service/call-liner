@@ -4,7 +4,7 @@ import type {
   AttackDslOperation,
   AttackDslReport,
   AttackDslScenario,
-  Phase4Flow,
+  TimelineFlow,
   TimelineBoard,
   TimelineClip,
   TimelineMarker,
@@ -12,7 +12,7 @@ import type {
 
 const REQUEST_DURATION_MS = 380;
 const REPLAY_DURATION_MS = 320;
-const PHASE4_LANE_ID = "lane-phase4";
+const FLOW_LANE_ID = "lane-flow";
 
 function hasKind(entrypoint: ActionSpaceEntrypoint, kind: string): boolean {
   return entrypoint.endpointKinds.includes(kind);
@@ -37,14 +37,14 @@ function toOperationDurationMs(operation: AttackDslOperation): number {
   return REPLAY_DURATION_MS;
 }
 
-function toOperationPhase(operation: AttackDslOperation): "phase1" | "phase2" {
-  // request は Phase 1 単体実行を示すため phase1 として扱う。
-  if (operation.type === "request") {
-    return "phase1";
+function toOperationCategory(operation: AttackDslOperation): "operation" {
+  // operation 種別にかかわらず統合機能では同一カテゴリとして扱う。
+  switch (operation.type) {
+    case "request":
+    case "advance_time":
+    case "replay":
+      return "operation";
   }
-
-  // advance_time / replay は Phase 2 の操作群なので phase2 として扱う。
-  return "phase2";
 }
 
 function toOperationLaneId(operation: AttackDslOperation): string {
@@ -90,21 +90,21 @@ function toOperationLabel(operation: AttackDslOperation): string {
 }
 
 /**
- * ActionSpace から Phase 4 用 authorize + callback フロー候補を導出する。
- * 入力例: `derivePhase4Flows(actionSpaceReport)`
+ * ActionSpace から authorize + callback フロー候補を導出する。
+ * 入力例: `deriveTimelineFlows(actionSpaceReport)`
  * 出力例: `[{ id: "flow-1", authorizePath: "/auth+/github+", callbackPath: "/auth+/github+/callback", ... }]`
  */
-export function derivePhase4Flows(actionSpace: ActionSpaceReport): Phase4Flow[] {
+export function deriveTimelineFlows(actionSpace: ActionSpaceReport): TimelineFlow[] {
   const authorizeEntrypoints = actionSpace.entrypoints.filter((entrypoint) => {
-    // authorize_start を持つ entrypoint だけを Phase 4 の始点候補にする。
+    // authorize_start を持つ entrypoint だけを始点候補にする。
     return hasKind(entrypoint, "authorize_start") && Boolean(entrypoint.routePath);
   });
   const callbackEntrypoints = actionSpace.entrypoints.filter((entrypoint) => {
-    // callback を持つ entrypoint だけを Phase 4 の終点候補にする。
+    // callback を持つ entrypoint だけを終点候補にする。
     return hasKind(entrypoint, "callback") && Boolean(entrypoint.routePath);
   });
 
-  const flows: Phase4Flow[] = [];
+  const flows: TimelineFlow[] = [];
   let flowIndex = 1;
 
   for (const authorize of authorizeEntrypoints) {
@@ -151,13 +151,13 @@ export function findScenarioById(
 }
 
 /**
- * Phase 1-4 情報を統合し、時間軸 UI 向けのボード構造を生成する。
+ * 統合レポート情報から、時間軸 UI 向けのボード構造を生成する。
  * 入力例: `buildTimelineBoard(scenario, flow)`
  * 出力例: `{ maxMs: 1600, lanes: [...], clips: [...], markers: [...] }`
  */
 export function buildTimelineBoard(
   scenario: AttackDslScenario,
-  phase4Flow?: Phase4Flow,
+  flow?: TimelineFlow,
 ): TimelineBoard {
   const clips: TimelineClip[] = [];
   const markers: TimelineMarker[] = [];
@@ -174,7 +174,7 @@ export function buildTimelineBoard(
       startMs: cursorMs,
       endMs: cursorMs + durationMs,
       tone: toOperationTone(operation),
-      phase: toOperationPhase(operation),
+      category: toOperationCategory(operation),
     });
 
     // request と replay は境界点が重要なのでマーカーを追加して判読性を高める。
@@ -190,25 +190,25 @@ export function buildTimelineBoard(
   }
 
   clips.push({
-    id: `${scenario.id}-phase3-policies`,
+    id: `${scenario.id}-policy-check`,
     laneId: "lane-policy",
     label: `expected:${scenario.expectedPolicyIds.join(",") || "none"}`,
     startMs: 80,
     endMs: Math.max(cursorMs, 520),
     tone: "red",
-    phase: "phase3",
+    category: "policy",
   });
 
-  // Phase 4 の flow が特定できるシナリオのみ authorize+callback の探索レーンを表示する。
-  if (phase4Flow) {
+  // フローが特定できるシナリオのみ authorize+callback の探索レーンを表示する。
+  if (flow) {
     clips.push({
-      id: `${scenario.id}-phase4-flow`,
-      laneId: PHASE4_LANE_ID,
-      label: `${phase4Flow.authorizePath} -> ${phase4Flow.callbackPath}`,
+      id: `${scenario.id}-flow-match`,
+      laneId: FLOW_LANE_ID,
+      label: `${flow.authorizePath} -> ${flow.callbackPath}`,
       startMs: 90,
       endMs: Math.max(cursorMs, 640),
       tone: "green",
-      phase: "phase4",
+      category: "flow",
     });
   }
 
@@ -216,11 +216,11 @@ export function buildTimelineBoard(
     maxMs: Math.max(cursorMs + 260, 1700),
     cursorMs: Math.min(554, cursorMs),
     lanes: [
-      { id: "lane-request", label: "Phase 1 Request" },
-      { id: "lane-advance", label: "Phase 2 AdvanceTime" },
-      { id: "lane-replay", label: "Phase 2 Replay" },
-      { id: "lane-policy", label: "Phase 3 Policy" },
-      { id: PHASE4_LANE_ID, label: "Phase 4 Two-Step Flow" },
+      { id: "lane-request", label: "Request" },
+      { id: "lane-advance", label: "Advance Time" },
+      { id: "lane-replay", label: "Replay" },
+      { id: "lane-policy", label: "Policy Check" },
+      { id: FLOW_LANE_ID, label: "Authorize + Callback Flow" },
     ],
     clips,
     markers,

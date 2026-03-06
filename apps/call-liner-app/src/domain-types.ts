@@ -65,7 +65,7 @@ export type TimelineClip = {
   startMs: number;
   endMs: number;
   tone: "red" | "green" | "amber";
-  phase: "phase1" | "phase2" | "phase3" | "phase4";
+  category: "operation" | "policy" | "flow";
 };
 
 export type TimelineMarker = {
@@ -87,7 +87,7 @@ export type TimelineBoard = {
   markers: TimelineMarker[];
 };
 
-export type Phase4Flow = {
+export type TimelineFlow = {
   id: string;
   authorizeEntrypointId: string;
   callbackEntrypointId: string;

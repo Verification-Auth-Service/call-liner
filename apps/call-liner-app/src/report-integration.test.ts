@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { ActionSpaceReport, AttackDslReport } from "./domain-types";
 import {
   buildTimelineBoard,
-  derivePhase4Flows,
+  deriveTimelineFlows,
   findScenarioById,
   parseActionSpaceReportText,
   parseAttackDslReportText,
 } from "./report-integration";
 import { sampleActionSpaceReport, sampleAttackDslReport } from "./sample-reports";
 
-describe("derivePhase4Flows", () => {
+describe("deriveTimelineFlows", () => {
   it("creates authorize + callback pairs", () => {
-    const flows = derivePhase4Flows(sampleActionSpaceReport);
+    const flows = deriveTimelineFlows(sampleActionSpaceReport);
 
     expect(flows).toEqual([
       {
@@ -42,7 +42,7 @@ describe("derivePhase4Flows", () => {
       ],
     };
 
-    expect(derivePhase4Flows(mismatched)).toEqual([]);
+    expect(deriveTimelineFlows(mismatched)).toEqual([]);
   });
 });
 
@@ -61,13 +61,13 @@ describe("findScenarioById", () => {
 });
 
 describe("buildTimelineBoard", () => {
-  it("includes phase3 and phase4 clips", () => {
+  it("includes policy and flow clips", () => {
     const scenario = findScenarioById(sampleAttackDslReport, "entrypoint-callback-1-replay");
-    const flow = derivePhase4Flows(sampleActionSpaceReport)[0];
+    const flow = deriveTimelineFlows(sampleActionSpaceReport)[0];
     const board = buildTimelineBoard(scenario, flow);
 
-    expect(board.clips.some((clip) => clip.phase === "phase3")).toBe(true);
-    expect(board.clips.some((clip) => clip.phase === "phase4")).toBe(true);
+    expect(board.clips.some((clip) => clip.category === "policy")).toBe(true);
+    expect(board.clips.some((clip) => clip.category === "flow")).toBe(true);
     expect(board.markers.length).toBeGreaterThan(0);
   });
 });
