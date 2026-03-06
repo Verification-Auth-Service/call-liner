@@ -69,6 +69,25 @@ pnpm --filter call-liner sandbox:phase1 -- \
 
 実行結果は JSON で出力され、`status` / `location` / `cookieJar` / `trace` を確認できます。
 
+## Phase 2 サンドボックス実行
+
+Phase 1 と同じ引数で初回 request を実行し、追加で `--advance-ms` と `--replay` が使えます。
+
+```bash
+pnpm --filter call-liner sandbox:phase2 -- \
+  --loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/callback.tsx \
+  --url "https://app.test/auth/github/callback?code=test-code&state=tampered" \
+  --request-id "callback" \
+  --session "oauth:state=test-state" \
+  --session "oauth:verifier=test-verifier" \
+  --env "GITHUB_CLIENT_ID=dummy-client-id" \
+  --env "GITHUB_CLIENT_SECRET=dummy-client-secret" \
+  --advance-ms 610000 \
+  --replay callback
+```
+
+実行結果は JSON で出力され、`steps` / `cookieJar` / `trace` を確認できます。
+
 ## 設計ドキュメント
 
 - [Timeline Sandbox 実装方針（ドラフト）](docs/timeline-sandbox-implementation-plan.md)
