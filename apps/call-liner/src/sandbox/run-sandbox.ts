@@ -18,6 +18,7 @@ import {
 import {
   applyEnvOverrides,
   buildDefaultFetchStubs,
+  type DefaultFetchStubOverrides,
   createInMemorySession,
   parseKeyValue,
   requireNextValue,
@@ -33,6 +34,7 @@ type ParsedSingleCliArgs = {
   requestId: string;
   sessionEntries: Array<[string, string]>;
   envEntries: Array<[string, string]>;
+  fetchStubOverrides: DefaultFetchStubOverrides;
   databaseStrategyName: DatabaseStubStrategyName;
   databaseGlobalName: string;
   databaseModelNames: string[];
@@ -51,6 +53,7 @@ type ParsedOauthTwoStepCliArgs = {
   callbackState?: string;
   sessionEntries: Array<[string, string]>;
   envEntries: Array<[string, string]>;
+  fetchStubOverrides: DefaultFetchStubOverrides;
   databaseStrategyName: DatabaseStubStrategyName;
   databaseGlobalName: string;
   databaseModelNames: string[];
@@ -110,6 +113,7 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
   let callbackCode: string | undefined;
   let callbackStateStrategy: OauthCallbackStateStrategy = "match_authorize";
   let callbackState: string | undefined;
+  const fetchStubOverrides: DefaultFetchStubOverrides = {};
   let databaseStrategyName: DatabaseStubStrategyName = "none";
   let databaseGlobalName = "db";
   const databaseModelNames: string[] = [];
@@ -271,6 +275,13 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       continue;
     }
 
+    // OAuth token スタブへ refresh_token を含めたい場合に上書きする。
+    if (arg === "--stub-refresh-token") {
+      fetchStubOverrides.githubRefreshToken = requireNextValue(arg, nextValue);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -325,6 +336,7 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       requestId,
       sessionEntries,
       envEntries,
+      fetchStubOverrides,
       databaseStrategyName,
       databaseGlobalName,
       databaseModelNames,
@@ -378,6 +390,7 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
     callbackState,
     sessionEntries,
     envEntries,
+    fetchStubOverrides,
     databaseStrategyName,
     databaseGlobalName,
     databaseModelNames,
@@ -535,8 +548,8 @@ const runOauthTwoStepScenario = async (
     callbackCode: parsed.callbackCode,
     callbackStateStrategy: parsed.callbackStateStrategy,
     fixedCallbackState: parsed.callbackState,
-    authorizeFetchStubs: buildDefaultFetchStubs(),
-    callbackFetchStubs: buildDefaultFetchStubs(),
+    authorizeFetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    callbackFetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
   });
 
   return {
@@ -586,7 +599,7 @@ const buildSandboxOperations = (parsed: ParsedSingleCliArgs): SandboxOperation[]
         url: parsed.url,
         method: parsed.method,
       },
-      fetchStubs: buildDefaultFetchStubs(),
+      fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
     },
   ];
 

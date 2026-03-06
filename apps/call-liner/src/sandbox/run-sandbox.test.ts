@@ -208,6 +208,47 @@ export async function loader(_args: LoaderFunctionArgs) {
     ).rejects.toThrow("Expected integer milliseconds for --advance-ms");
   });
 
+  it("adds refresh_token to token stub when --stub-refresh-token is provided", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-token-cli-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "callback.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+  });
+  return new Response(await tokenRes.text(), { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/auth/github-app/callback?code=ok&state=state-1",
+        "--stub-refresh-token",
+        "sandbox-refresh-token",
+      ]);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const output = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+        steps: Array<{ type: string; body?: string }>;
+      };
+      const tokenBody = JSON.parse(output.steps[0]?.body ?? "{}") as {
+        refresh_token?: string;
+      };
+
+      expect(tokenBody.refresh_token).toBe("sandbox-refresh-token");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("injects memory-client database strategy globals in single scenario", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-db-cli-"));
 
