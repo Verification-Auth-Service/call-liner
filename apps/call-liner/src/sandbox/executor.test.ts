@@ -151,4 +151,25 @@ describe("sandbox executor", () => {
       }),
     ).rejects.toThrow("Replay target request id was not found");
   });
+
+  it("throws when advance_time receives both ms and atMs", async () => {
+    const loader = async (): Promise<Response> => {
+      return new Response("ok", { status: 200 });
+    };
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
+
+    await expect(
+      runSandbox({
+        loader,
+        state,
+        operations: [
+          {
+            type: "advance_time",
+            ms: 1_000,
+            atMs: 1_700_000_100_000,
+          },
+        ],
+      }),
+    ).rejects.toThrow("advance_time requires either ms or atMs");
+  });
 });

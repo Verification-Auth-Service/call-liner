@@ -60,6 +60,49 @@ export type RunSandboxResult = {
   steps: SandboxStepResult[];
 };
 
+type ExecuteRequestArgs = {
+  state: SandboxState;
+  operation: SandboxRequestOperation;
+};
+
+interface SandboxRequestExecutor {
+  execute(args: ExecuteRequestArgs): Promise<RunLoaderInSandboxResult>;
+}
+
+class RuntimeSandboxRequestExecutor implements SandboxRequestExecutor {
+  private readonly loader: SandboxLoader;
+
+  constructor(loader: SandboxLoader) {
+    this.loader = loader;
+  }
+
+  async execute(args: ExecuteRequestArgs): Promise<RunLoaderInSandboxResult> {
+    return runLoaderInSandbox({
+      loader: this.loader,
+      state: args.state,
+      request: args.operation.request,
+      params: args.operation.params,
+      context: args.operation.context,
+      fetchStubs: args.operation.fetchStubs,
+    });
+  }
+}
+
+class ExpiredCookieCleanupDecorator implements SandboxRequestExecutor {
+  private readonly wrapped: SandboxRequestExecutor;
+
+  constructor(wrapped: SandboxRequestExecutor) {
+    this.wrapped = wrapped;
+  }
+
+  async execute(args: ExecuteRequestArgs): Promise<RunLoaderInSandboxResult> {
+    return this.wrapped.execute({
+      state: removeExpiredCookies(args.state),
+      operation: args.operation,
+    });
+  }
+}
+
 type RecordedRequest = {
   id?: string;
   operationIndex: number;
@@ -84,6 +127,7 @@ export const runSandbox = async (
   let workingState = cloneState(options.state);
   const steps: SandboxStepResult[] = [];
   const recordedRequests: RecordedRequest[] = [];
+  const requestExecutor = createSandboxRequestExecutor(options.loader);
 
   for (let index = 0; index < options.operations.length; index += 1) {
     const operation = options.operations[index];
@@ -91,7 +135,10 @@ export const runSandbox = async (
     // operation 種別ごとに状態遷移が異なるため、分岐して専用処理を実行する。
     switch (operation.type) {
       case "request": {
-        const result = await executeRequest(options.loader, workingState, operation);
+        const result = await requestExecutor.execute({
+          state: workingState,
+          operation,
+        });
         workingState = result.nextState;
         recordedRequests.push({
           id: operation.id,
@@ -120,12 +167,15 @@ export const runSandbox = async (
       }
       case "replay": {
         const target = resolveReplayTarget(recordedRequests, operation.target);
-        const replayResult = await executeRequest(options.loader, workingState, {
-          type: "request",
-          request: target.request,
-          params: target.params,
-          context: target.context,
-          fetchStubs: target.fetchStubs,
+        const replayResult = await requestExecutor.execute({
+          state: workingState,
+          operation: {
+            type: "request",
+            request: target.request,
+            params: target.params,
+            context: target.context,
+            fetchStubs: target.fetchStubs,
+          },
         });
         replayResult.nextState.trace.push({
           type: "replay",
@@ -150,21 +200,20 @@ export const runSandbox = async (
   };
 };
 
-const executeRequest = async (
+/**
+ * request 実行器をデコレーター合成で構築する。
+ *
+ * 入力例:
+ * - loader: async ({ request }) => new Response(request.url, { status: 200 })
+ * 出力例:
+ * - execute() 時に「期限切れ cookie 除去 -> runtime 実行」の順で処理される executor
+ */
+const createSandboxRequestExecutor = (
   loader: SandboxLoader,
-  state: SandboxState,
-  operation: SandboxRequestOperation,
-): Promise<RunLoaderInSandboxResult> => {
-  const stateWithoutExpiredCookies = removeExpiredCookies(state);
+): SandboxRequestExecutor => {
+  const runtimeExecutor = new RuntimeSandboxRequestExecutor(loader);
 
-  return runLoaderInSandbox({
-    loader,
-    state: stateWithoutExpiredCookies,
-    request: operation.request,
-    params: operation.params,
-    context: operation.context,
-    fetchStubs: operation.fetchStubs,
-  });
+  return new ExpiredCookieCleanupDecorator(runtimeExecutor);
 };
 
 const applyAdvanceTime = (
