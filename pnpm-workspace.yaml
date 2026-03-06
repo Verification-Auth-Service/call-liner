@@ -1,2 +1,3 @@
 packages:
-  - "apps/*"
+  - "apps/call-liner"
+  - "apps/call-liner-app"

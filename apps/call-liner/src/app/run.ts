@@ -16,6 +16,7 @@ import {
   writeCollectedAstReports,
 } from "./write-entry-ast-reports";
 import { buildActionSpaceReport } from "./build-action-space-report";
+import { buildAttackDslReport } from "./build-attack-dsl-report";
 
 interface WrittenFilesTree {
   [key: string]: WrittenFilesTree | string;
@@ -303,6 +304,15 @@ export async function run(argv: string[]): Promise<void> {
     await writeFile(
       path.join(outputDir, "action-space.json"),
       JSON.stringify(actionSpace, null, 2),
+      "utf8",
+    );
+    const attackDsl = buildAttackDslReport({
+      actionSpace,
+      generatedAt: astData.generatedAt,
+    });
+    await writeFile(
+      path.join(outputDir, "attack-dsl.json"),
+      JSON.stringify(attackDsl, null, 2),
       "utf8",
     );
   }

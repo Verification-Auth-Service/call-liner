@@ -4,6 +4,8 @@
   "packageManager": "pnpm@10.26.0",
   "scripts": {
     "dev": "pnpm --filter call-liner dev",
+    "dev:cli": "pnpm --filter call-liner dev",
+    "dev:app": "pnpm --filter call-liner-app dev",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "format": "prettier --write ."
