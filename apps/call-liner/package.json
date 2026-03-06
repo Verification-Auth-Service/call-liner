@@ -5,9 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "sandbox:phase1": "node --import tsx src/sandbox/run-phase1.ts",
-    "sandbox:phase2": "node --import tsx src/sandbox/run-phase2.ts",
-    "sandbox:phase4": "node --import tsx src/sandbox/run-phase4.ts",
+    "sandbox:run": "node --import tsx src/sandbox/run-sandbox.ts",
     "run:sample-auth-app": "tsx src/index.ts -d --client-entry /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/root.tsx --resource-entry /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/resource-server/app/routes.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

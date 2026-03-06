@@ -2,15 +2,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runPhase2Cli } from "./run-phase2";
+import { runSandboxCli } from "./run-sandbox";
 
-describe("runPhase2Cli", () => {
+describe("runSandboxCli", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("runs phase2 operations and prints step results as json", async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-phase2-cli-"));
+  it("runs integrated operations and prints step results as json", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-cli-"));
 
     try {
       const routeFilePath = path.join(tempRoot, "callback.tsx");
@@ -32,7 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await writeFile(routeFilePath, source, "utf8");
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-      await runPhase2Cli([
+      await runSandboxCli([
         "--loader-file",
         routeFilePath,
         "--url",
@@ -74,7 +74,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   it("throws when --advance-ms is not integer", async () => {
     await expect(
-      runPhase2Cli(["--loader-file", "/tmp/callback.tsx", "--url", "https://app.test", "--advance-ms", "x"]),
+      runSandboxCli([
+        "--loader-file",
+        "/tmp/callback.tsx",
+        "--url",
+        "https://app.test",
+        "--advance-ms",
+        "x",
+      ]),
     ).rejects.toThrow("Expected integer milliseconds for --advance-ms");
   });
 });

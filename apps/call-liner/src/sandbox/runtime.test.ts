@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  createPhase1SandboxState,
-  runLoaderInPhase1Sandbox,
-} from "./phase1";
+  createSandboxState,
+  runLoaderInSandbox,
+} from "./runtime";
 
-describe("phase1 sandbox", () => {
+describe("sandbox runtime", () => {
   it("calls loader directly and forwards Set-Cookie to the next request", async () => {
     const loader = async ({ request }: { request: Request }): Promise<Response> => {
       const url = new URL(request.url);
@@ -23,16 +23,16 @@ describe("phase1 sandbox", () => {
       return new Response(request.headers.get("cookie") ?? "", { status: 200 });
     };
 
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
 
-    const first = await runLoaderInPhase1Sandbox({
+    const first = await runLoaderInSandbox({
       loader,
       state,
       request: {
         url: "https://example.test/auth/callback?step=set",
       },
     });
-    const second = await runLoaderInPhase1Sandbox({
+    const second = await runLoaderInSandbox({
       loader,
       state: first.nextState,
       request: {
@@ -55,9 +55,9 @@ describe("phase1 sandbox", () => {
       });
       return new Response(String(tokenResponse.status), { status: 200 });
     };
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
 
-    const result = await runLoaderInPhase1Sandbox({
+    const result = await runLoaderInSandbox({
       loader,
       state,
       request: {
@@ -87,10 +87,10 @@ describe("phase1 sandbox", () => {
       await fetch("https://example.test/token");
       return new Response("unreachable", { status: 200 });
     };
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
 
     await expect(
-      runLoaderInPhase1Sandbox({
+      runLoaderInSandbox({
         loader,
         state,
         request: {

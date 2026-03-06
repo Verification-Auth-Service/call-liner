@@ -1,11 +1,11 @@
 import { pathToFileURL } from "node:url";
 import { loadRouteLoaderFromFile, type SessionLike } from "./load-route-loader-from-file";
-import { createPhase1SandboxState, type SandboxFetchStub } from "./phase1";
+import { createSandboxState, type SandboxFetchStub } from "./runtime";
 import {
-  runPhase2Sandbox,
-  type Phase2SandboxOperation,
-  type Phase2StepResult,
-} from "./phase2";
+  runSandbox,
+  type SandboxOperation,
+  type SandboxStepResult,
+} from "./executor";
 
 type ParsedCliArgs = {
   loaderFile: string;
@@ -19,20 +19,20 @@ type ParsedCliArgs = {
 };
 
 /**
- * Phase 2 の関数レベルサンドボックスを CLI から実行する。
+ * 統合サンドボックスを CLI から実行する。
  *
  * 入力例:
  * - ["--loader-file", "/tmp/callback.tsx", "--url", "https://app.test/auth/github/callback?code=a&state=b", "--advance-ms", "61000", "--replay", "callback"]
  * 出力例:
  * - 標準出力に { steps, cookieJar, trace } を JSON 表示
  */
-export const runPhase2Cli = async (rawArgs: string[]): Promise<void> => {
-  const parsed = parsePhase2CliArgs(rawArgs);
+export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
+  const parsed = parseSandboxCliArgs(rawArgs);
   const originalEnvValues = applyEnvOverrides(parsed.envEntries);
 
   try {
     const sessionRecord = new Map<string, unknown>(parsed.sessionEntries);
-    const state = createPhase1SandboxState();
+    const state = createSandboxState();
     const loader = await loadRouteLoaderFromFile(parsed.loaderFile, {
       redirect: (url, init) => {
         const headers = new Headers(init?.headers);
@@ -44,8 +44,8 @@ export const runPhase2Cli = async (rawArgs: string[]): Promise<void> => {
         toSetCookieHeader(sessionRecord, session, options?.maxAge),
     });
 
-    const operations = buildPhase2Operations(parsed);
-    const result = await runPhase2Sandbox({
+    const operations = buildSandboxOperations(parsed);
+    const result = await runSandbox({
       loader,
       state,
       operations,
@@ -67,7 +67,7 @@ export const runPhase2Cli = async (rawArgs: string[]): Promise<void> => {
   }
 };
 
-const parsePhase2CliArgs = (rawArgs: string[]): ParsedCliArgs => {
+const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
   let loaderFile = "";
   let url = "";
   let method = "GET";
@@ -177,8 +177,8 @@ const parsePhase2CliArgs = (rawArgs: string[]): ParsedCliArgs => {
   };
 };
 
-const buildPhase2Operations = (parsed: ParsedCliArgs): Phase2SandboxOperation[] => {
-  const operations: Phase2SandboxOperation[] = [
+const buildSandboxOperations = (parsed: ParsedCliArgs): SandboxOperation[] => {
+  const operations: SandboxOperation[] = [
     {
       type: "request",
       id: parsed.requestId,
@@ -208,7 +208,7 @@ const buildPhase2Operations = (parsed: ParsedCliArgs): Phase2SandboxOperation[] 
 };
 
 const serializeStepResults = async (
-  steps: Phase2StepResult[],
+  steps: SandboxStepResult[],
 ): Promise<
   Array<
     | { type: "request"; id?: string; status: number; location: string | null; body: string }
@@ -296,7 +296,7 @@ const toSetCookieHeader = (
 ): string => {
   const payload = JSON.stringify(Object.fromEntries(sessionRecord.entries()));
   const encoded = Buffer.from(payload, "utf8").toString("base64url");
-  const parts = [`session=${encoded}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  const parts = ["session=" + encoded, "Path=/", "HttpOnly", "SameSite=Lax"];
 
   // maxAge 指定がある場合だけ Set-Cookie に反映する。
   if (typeof maxAge === "number") {
@@ -375,7 +375,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  runPhase2Cli(process.argv.slice(2)).catch((error: unknown) => {
+  runSandboxCli(process.argv.slice(2)).catch((error: unknown) => {
     // Error 型は message を優先し、それ以外は文字列化して表示する。
     if (error instanceof Error) {
       console.error(error.message);

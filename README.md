@@ -53,28 +53,12 @@ pnpm typecheck
 pnpm test
 ```
 
-## Phase 1 サンドボックス実行
+## サンドボックス実行
 
-`loader` を関数レベルで直接実行できます。例として、`sample-auth-app` の callback route をパス指定で実行できます。
-
-```bash
-pnpm --filter call-liner sandbox:phase1 -- \
-  --loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/callback.tsx \
-  --url "https://app.test/auth/github/callback?code=test-code&state=test-state" \
-  --session "oauth:state=test-state" \
-  --session "oauth:verifier=test-verifier" \
-  --env "GITHUB_CLIENT_ID=dummy-client-id" \
-  --env "GITHUB_CLIENT_SECRET=dummy-client-secret"
-```
-
-実行結果は JSON で出力され、`status` / `location` / `cookieJar` / `trace` を確認できます。
-
-## Phase 2 サンドボックス実行
-
-Phase 1 と同じ引数で初回 request を実行し、追加で `--advance-ms` と `--replay` が使えます。
+`loader` を統合サンドボックスで直接実行できます。初回 request は必須で、必要に応じて `--advance-ms` と `--replay` を追加できます。
 
 ```bash
-pnpm --filter call-liner sandbox:phase2 -- \
+pnpm --filter call-liner sandbox:run -- \
   --loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/callback.tsx \
   --url "https://app.test/auth/github/callback?code=test-code&state=tampered" \
   --request-id "callback" \

@@ -98,12 +98,12 @@ export type RunLoaderInSandboxResult = {
 };
 
 /**
- * Phase 1 向けのサンドボックス状態を作る。
+ * サンドボックス状態を作る。
  *
  * 入力例: { nowMs: 1_700_000_000_000 }
  * 出力例: { nowMs: 1700000000000, cookieJar: {}, trace: [] }
  */
-export const createPhase1SandboxState = (
+export const createSandboxState = (
   input?: Partial<SandboxState>,
 ): SandboxState => {
   return {
@@ -123,7 +123,7 @@ export const createPhase1SandboxState = (
  * - response.status: 200
  * - nextState.trace: [{ type: "request", ... }, { type: "response", ... }]
  */
-export const runLoaderInPhase1Sandbox = async (
+export const runLoaderInSandbox = async (
   options: RunLoaderInSandboxOptions,
 ): Promise<RunLoaderInSandboxResult> => {
   const nextState = cloneState(options.state);
@@ -333,7 +333,7 @@ const readSetCookieHeaders = (headers: Headers): string[] => {
 
   const singleSetCookie = headers.get("set-cookie");
 
-  // フォールバックでは 1 件のみ取得し、複数指定の厳密分解は Phase 2 で扱う。
+  // フォールバックでは 1 件のみ取得し、複数指定の厳密分解は executor 側で扱う。
   if (!singleSetCookie) {
     return [];
   }

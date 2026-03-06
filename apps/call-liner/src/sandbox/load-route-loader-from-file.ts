@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
-import type { SandboxLoader } from "./phase1";
+import type { SandboxLoader } from "./runtime";
 
 type RouteLoaderRuntimeDeps = {
   redirect: (url: string, init?: ResponseInit) => Response;
