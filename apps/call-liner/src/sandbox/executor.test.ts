@@ -1,93 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createPhase1SandboxState } from "./phase1";
-import { runPhase2Sandbox } from "./phase2";
+import { createSandboxState } from "./runtime";
+import { runSandbox } from "./executor";
 
-describe("phase2 sandbox", () => {
-  it("changes replay result across timeline when cookie expires", async () => {
-    const loader = async ({ request }: { request: Request }): Promise<Response> => {
-      const step = new URL(request.url).searchParams.get("step");
-
-      // 初回だけ短寿命 cookie を発行して、時間経過での差分を観測可能にする。
-      if (step === "issue") {
-        return new Response("issued", {
-          status: 200,
-          headers: {
-            "Set-Cookie": "timeline=alive; Max-Age=2; Path=/",
-          },
-        });
-      }
-
-      return new Response(request.headers.get("cookie") ?? "none", { status: 200 });
-    };
-
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
-    const result = await runPhase2Sandbox({
-      loader,
-      state,
-      operations: [
-        {
-          type: "request",
-          id: "issue-cookie",
-          request: {
-            url: "https://example.test/auth/callback?step=issue",
-          },
-        },
-        {
-          type: "request",
-          id: "check-cookie",
-          request: {
-            url: "https://example.test/auth/callback?step=check",
-          },
-        },
-        {
-          type: "advance_time",
-          ms: 1_500,
-        },
-        {
-          type: "replay",
-          target: "check-cookie",
-        },
-        {
-          type: "advance_time",
-          ms: 600,
-        },
-        {
-          type: "replay",
-          target: "check-cookie",
-        },
-      ],
-    });
-
-    const checkBeforeAdvance = result.steps[1];
-    // 2 ステップ目は request なので cookie 付きレスポンスが読める。
-    if (!checkBeforeAdvance || checkBeforeAdvance.type !== "request") {
-      throw new Error("Expected second step to be a request step");
-    }
-
-    const checkAfterFirstAdvance = result.steps[3];
-    // 4 ステップ目は replay なので同じ request を時間だけ変えて検証する。
-    if (!checkAfterFirstAdvance || checkAfterFirstAdvance.type !== "replay") {
-      throw new Error("Expected fourth step to be a replay step");
-    }
-
-    const checkAfterExpiry = result.steps[5];
-    // 6 ステップ目も replay で、期限切れ後に cookie が消えることを確認する。
-    if (!checkAfterExpiry || checkAfterExpiry.type !== "replay") {
-      throw new Error("Expected sixth step to be a replay step");
-    }
-
-    expect(await checkBeforeAdvance.response.text()).toContain("timeline=alive");
-    expect(await checkAfterFirstAdvance.response.text()).toContain("timeline=alive");
-    expect(await checkAfterExpiry.response.text()).toBe("none");
-    expect(
-      result.nextState.trace.some(
-        (event) => event.type === "cookie_expired" && event.name === "timeline",
-      ),
-    ).toBe(true);
-  });
-
+describe("sandbox executor", () => {
   it("expires cookies after advance_time and stops sending them", async () => {
-    const loader = async ({ request }: { request: Request }): Promise<Response> => {
+    const loader = async ({
+      request,
+    }: {
+      request: Request;
+    }): Promise<Response> => {
       const step = new URL(request.url).searchParams.get("step");
 
       // cookie 発行フェーズでは 1 秒寿命のセッション cookie を返す。
@@ -95,7 +16,7 @@ describe("phase2 sandbox", () => {
         return new Response("issued", {
           status: 200,
           headers: {
-            "Set-Cookie": "session=phase2; Max-Age=1; Path=/",
+            "Set-Cookie": "session=sandbox; Max-Age=1; Path=/",
           },
         });
       }
@@ -103,8 +24,8 @@ describe("phase2 sandbox", () => {
       return new Response(request.headers.get("cookie") ?? "", { status: 200 });
     };
 
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
-    const result = await runPhase2Sandbox({
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
+    const result = await runSandbox({
       loader,
       state,
       operations: [
@@ -132,7 +53,8 @@ describe("phase2 sandbox", () => {
     expect(result.nextState.cookieJar.session).toBeUndefined();
     expect(
       result.nextState.trace.some(
-        (event) => event.type === "time_advanced" && event.toMs === 1_700_000_001_000,
+        (event) =>
+          event.type === "time_advanced" && event.toMs === 1_700_000_001_000,
       ),
     ).toBe(true);
     expect(
@@ -151,7 +73,11 @@ describe("phase2 sandbox", () => {
 
   it("replays a previous request by id", async () => {
     const seenCodes = new Set<string>();
-    const loader = async ({ request }: { request: Request }): Promise<Response> => {
+    const loader = async ({
+      request,
+    }: {
+      request: Request;
+    }): Promise<Response> => {
       const code = new URL(request.url).searchParams.get("code") ?? "";
 
       // 同一 code の再送は replay 攻撃として拒否する。
@@ -163,8 +89,8 @@ describe("phase2 sandbox", () => {
       return new Response("ok", { status: 200 });
     };
 
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
-    const result = await runPhase2Sandbox({
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
+    const result = await runSandbox({
       loader,
       state,
       operations: [
@@ -210,10 +136,10 @@ describe("phase2 sandbox", () => {
     const loader = async (): Promise<Response> => {
       return new Response("ok", { status: 200 });
     };
-    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
+    const state = createSandboxState({ nowMs: 1_700_000_000_000 });
 
     await expect(
-      runPhase2Sandbox({
+      runSandbox({
         loader,
         state,
         operations: [

@@ -1,13 +1,13 @@
 import {
-  runLoaderInPhase1Sandbox,
+  runLoaderInSandbox,
   type LoaderRequestInput,
   type RunLoaderInSandboxResult,
   type SandboxFetchStub,
   type SandboxLoader,
   type SandboxState,
-} from "./phase1";
+} from "./runtime";
 
-export type Phase2RequestOperation = {
+export type SandboxRequestOperation = {
   type: "request";
   id?: string;
   request: LoaderRequestInput;
@@ -16,23 +16,23 @@ export type Phase2RequestOperation = {
   fetchStubs?: SandboxFetchStub[];
 };
 
-export type Phase2AdvanceTimeOperation = {
+export type SandboxAdvanceTimeOperation = {
   type: "advance_time";
   ms?: number;
   atMs?: number;
 };
 
-export type Phase2ReplayOperation = {
+export type SandboxReplayOperation = {
   type: "replay";
   target: string | number;
 };
 
-export type Phase2SandboxOperation =
-  | Phase2RequestOperation
-  | Phase2AdvanceTimeOperation
-  | Phase2ReplayOperation;
+export type SandboxOperation =
+  | SandboxRequestOperation
+  | SandboxAdvanceTimeOperation
+  | SandboxReplayOperation;
 
-export type Phase2StepResult =
+export type SandboxStepResult =
   | {
       type: "request";
       id?: string;
@@ -49,15 +49,15 @@ export type Phase2StepResult =
       response: Response;
     };
 
-export type RunPhase2SandboxOptions = {
+export type RunSandboxOptions = {
   loader: SandboxLoader;
   state: SandboxState;
-  operations: Phase2SandboxOperation[];
+  operations: SandboxOperation[];
 };
 
-export type RunPhase2SandboxResult = {
+export type RunSandboxResult = {
   nextState: SandboxState;
-  steps: Phase2StepResult[];
+  steps: SandboxStepResult[];
 };
 
 type RecordedRequest = {
@@ -70,7 +70,7 @@ type RecordedRequest = {
 };
 
 /**
- * Phase 2 の operation 列を順に実行し、時刻進行と replay を含む次状態を返す。
+ * サンドボックスの operation 列を順に実行し、時刻進行と replay を含む次状態を返す。
  *
  * 入力例:
  * - operations: [{ type: "request", id: "callback", request: { url: "https://app.test/callback?code=a" } }, { type: "advance_time", ms: 1000 }, { type: "replay", target: "callback" }]
@@ -78,11 +78,11 @@ type RecordedRequest = {
  * - steps: [{ type: "request", ... }, { type: "advance_time", ... }, { type: "replay", ... }]
  * - nextState.trace に time_advanced / cookie_expired / replay が追記される
  */
-export const runPhase2Sandbox = async (
-  options: RunPhase2SandboxOptions,
-): Promise<RunPhase2SandboxResult> => {
+export const runSandbox = async (
+  options: RunSandboxOptions,
+): Promise<RunSandboxResult> => {
   let workingState = cloneState(options.state);
-  const steps: Phase2StepResult[] = [];
+  const steps: SandboxStepResult[] = [];
   const recordedRequests: RecordedRequest[] = [];
 
   for (let index = 0; index < options.operations.length; index += 1) {
@@ -153,11 +153,11 @@ export const runPhase2Sandbox = async (
 const executeRequest = async (
   loader: SandboxLoader,
   state: SandboxState,
-  operation: Phase2RequestOperation,
+  operation: SandboxRequestOperation,
 ): Promise<RunLoaderInSandboxResult> => {
   const stateWithoutExpiredCookies = removeExpiredCookies(state);
 
-  return runLoaderInPhase1Sandbox({
+  return runLoaderInSandbox({
     loader,
     state: stateWithoutExpiredCookies,
     request: operation.request,
@@ -169,7 +169,7 @@ const executeRequest = async (
 
 const applyAdvanceTime = (
   state: SandboxState,
-  operation: Phase2AdvanceTimeOperation,
+  operation: SandboxAdvanceTimeOperation,
 ): { nextState: SandboxState; fromMs: number; toMs: number } => {
   const fromMs = state.nowMs;
   const toMs = resolveNextTime(fromMs, operation);
@@ -190,7 +190,7 @@ const applyAdvanceTime = (
 
 const resolveNextTime = (
   currentMs: number,
-  operation: Phase2AdvanceTimeOperation,
+  operation: SandboxAdvanceTimeOperation,
 ): number => {
   // 相対指定と絶対指定が同時に与えられると意図が曖昧なので拒否する。
   if (operation.ms !== undefined && operation.atMs !== undefined) {
