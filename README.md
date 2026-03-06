@@ -88,6 +88,23 @@ pnpm --filter call-liner sandbox:phase2 -- \
 
 実行結果は JSON で出力され、`steps` / `cookieJar` / `trace` を確認できます。
 
+## Phase 4 サンドボックス実行（authorize + callback）
+
+`authorize` と `callback` の route loader を 2 ステップで連続実行できます。`--state-mode` で callback 側の `state` を切り替え、正常系・改ざん・欠落を探索できます。
+
+```bash
+pnpm --filter call-liner sandbox:phase4 -- \
+  --authorize-loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/_index.tsx \
+  --callback-loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/callback.tsx \
+  --authorize-url "https://app.test/auth/github" \
+  --callback-url-base "https://app.test/auth/github/callback" \
+  --state-mode match_authorize \
+  --env "GITHUB_CLIENT_ID=dummy-client-id" \
+  --env "GITHUB_CLIENT_SECRET=dummy-client-secret"
+```
+
+実行結果は JSON で出力され、`steps` / `callbackRequest` / `cookieJar` / `trace` を確認できます。
+
 ## 設計ドキュメント
 
 - [Timeline Sandbox 実装方針（ドラフト）](docs/timeline-sandbox-implementation-plan.md)
