@@ -72,12 +72,13 @@ pnpm --filter call-liner sandbox:run -- \
 
 実行結果は JSON で出力され、`steps` / `cookieJar` / `trace` を確認できます。
 
-## Phase 4 サンドボックス実行（authorize + callback）
+## OAuth 2 ステップ実行（authorize + callback）
 
-`authorize` と `callback` の route loader を 2 ステップで連続実行できます。`--state-mode` で callback 側の `state` を切り替え、正常系・改ざん・欠落を探索できます。
+`authorize` と `callback` の route loader を 2 ステップで連続実行できます。`--scenario oauth-two-step` で実行モードを切り替え、`--state-mode` で callback 側の `state` を切り替えて正常系・改ざん・欠落を探索できます。
 
 ```bash
-pnpm --filter call-liner sandbox:phase4 -- \
+pnpm --filter call-liner sandbox:run -- \
+  --scenario oauth-two-step \
   --authorize-loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/_index.tsx \
   --callback-loader-file /home/shio4001/workspace/typeauth-project/sample-auth-app/apps/auth-app/app/routes/auth+/github+/callback.tsx \
   --authorize-url "https://app.test/auth/github" \

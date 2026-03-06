@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createPhase1SandboxState } from "./phase1";
-import { runPhase4Sandbox } from "./phase4";
+import { createSandboxState } from "./runtime";
+import { runOauthTwoStepSandbox } from "./oauth-two-step";
 
-describe("phase4 sandbox", () => {
+describe("oauth two-step sandbox", () => {
   it("runs authorize and callback with matched state", async () => {
     const authorizeLoader = async (): Promise<Response> => {
       return new Response(null, {
@@ -29,10 +29,10 @@ describe("phase4 sandbox", () => {
       return new Response("state-mismatch", { status: 409 });
     };
 
-    const result = await runPhase4Sandbox({
+    const result = await runOauthTwoStepSandbox({
       authorizeLoader,
       callbackLoader,
-      state: createPhase1SandboxState({ nowMs: 1_700_000_000_000 }),
+      state: createSandboxState({ nowMs: 1_700_000_000_000 }),
       authorizeRequest: {
         url: "https://app.test/auth/github",
       },
@@ -72,10 +72,10 @@ describe("phase4 sandbox", () => {
       return new Response("ok", { status: 200 });
     };
 
-    const result = await runPhase4Sandbox({
+    const result = await runOauthTwoStepSandbox({
       authorizeLoader,
       callbackLoader,
-      state: createPhase1SandboxState({ nowMs: 1_700_000_000_000 }),
+      state: createSandboxState({ nowMs: 1_700_000_000_000 }),
       authorizeRequest: {
         url: "https://app.test/auth/github",
       },
@@ -101,10 +101,10 @@ describe("phase4 sandbox", () => {
     };
 
     await expect(
-      runPhase4Sandbox({
+      runOauthTwoStepSandbox({
         authorizeLoader,
         callbackLoader,
-        state: createPhase1SandboxState({ nowMs: 1_700_000_000_000 }),
+        state: createSandboxState({ nowMs: 1_700_000_000_000 }),
         authorizeRequest: {
           url: "https://app.test/auth/github",
         },
