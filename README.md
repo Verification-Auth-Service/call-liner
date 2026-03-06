@@ -25,7 +25,7 @@ pnpm dev -- --client-entry /path/to/client.tsx --resource-entry /path/to/resourc
 pnpm dev -- -d --client-entry /path/to/client.tsx --resource-entry /path/to/resource.ts
 ```
 
-`--ast-json` を付けると処理向けの集約 JSON (`report/ast-data.json`) が出力されます。
+`--ast-json` を付けると処理向けの集約 JSON (`report/ast-data.json`) と、静的解析ベースのアクション空間 (`report/action-space.json`) が出力されます。
 
 ```bash
 pnpm dev -- --ast-json --client-entry /path/to/client.tsx --resource-entry /path/to/resource.ts

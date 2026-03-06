@@ -531,9 +531,17 @@ describe("run", () => {
         path.join(tempRoot, "report", "ast-data.json"),
         "utf8",
       );
+      const actionSpaceRaw = await readFile(
+        path.join(tempRoot, "report", "action-space.json"),
+        "utf8",
+      );
       const astData = JSON.parse(astDataRaw) as {
         version: number;
         reports: Array<{ entryType: string; sourcePath: string }>;
+      };
+      const actionSpace = JSON.parse(actionSpaceRaw) as {
+        version: number;
+        summary: { entrypoints: number };
       };
 
       expect(astData.version).toBe(1);
@@ -542,6 +550,8 @@ describe("run", () => {
         entryType: "client",
         sourcePath: path.join(tempRoot, clientEntry),
       });
+      expect(actionSpace.version).toBe(1);
+      expect(actionSpace.summary.entrypoints).toBe(0);
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;
