@@ -10,6 +10,7 @@ type RouteLoaderRuntimeDeps = {
     session: SessionLike,
     options?: { maxAge?: number },
   ) => Promise<string> | string;
+  globals?: Record<string, unknown>;
 };
 
 export type SessionLike = {
@@ -41,12 +42,17 @@ export const loadRouteLoaderFromFile = async (
     fileName: routeModulePath,
   });
 
+  const injectedGlobalNames = Object.keys(runtimeDeps.globals ?? {});
+  const injectedGlobalValues = injectedGlobalNames.map(
+    (name) => runtimeDeps.globals?.[name],
+  );
   const loaderFactory = new Function(
     "redirect",
     "getSession",
     "commitSession",
     "process",
     "console",
+    ...injectedGlobalNames,
     `${transpiled.outputText}
 return typeof loader === "function" ? loader : undefined;`,
   ) as (
@@ -55,6 +61,7 @@ return typeof loader === "function" ? loader : undefined;`,
     commitSession: RouteLoaderRuntimeDeps["commitSession"],
     processRef: NodeJS.Process,
     consoleRef: Console,
+    ...globals: unknown[]
   ) => unknown;
 
   const loaded = loaderFactory(
@@ -63,6 +70,7 @@ return typeof loader === "function" ? loader : undefined;`,
     runtimeDeps.commitSession,
     process,
     console,
+    ...injectedGlobalValues,
   );
 
   // export loader が見つからないモジュールは実行対象にできないため明示エラーにする。

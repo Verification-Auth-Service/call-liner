@@ -3,6 +3,89 @@ import { createPhase1SandboxState } from "./phase1";
 import { runPhase2Sandbox } from "./phase2";
 
 describe("phase2 sandbox", () => {
+  it("changes replay result across timeline when cookie expires", async () => {
+    const loader = async ({ request }: { request: Request }): Promise<Response> => {
+      const step = new URL(request.url).searchParams.get("step");
+
+      // 初回だけ短寿命 cookie を発行して、時間経過での差分を観測可能にする。
+      if (step === "issue") {
+        return new Response("issued", {
+          status: 200,
+          headers: {
+            "Set-Cookie": "timeline=alive; Max-Age=2; Path=/",
+          },
+        });
+      }
+
+      return new Response(request.headers.get("cookie") ?? "none", { status: 200 });
+    };
+
+    const state = createPhase1SandboxState({ nowMs: 1_700_000_000_000 });
+    const result = await runPhase2Sandbox({
+      loader,
+      state,
+      operations: [
+        {
+          type: "request",
+          id: "issue-cookie",
+          request: {
+            url: "https://example.test/auth/callback?step=issue",
+          },
+        },
+        {
+          type: "request",
+          id: "check-cookie",
+          request: {
+            url: "https://example.test/auth/callback?step=check",
+          },
+        },
+        {
+          type: "advance_time",
+          ms: 1_500,
+        },
+        {
+          type: "replay",
+          target: "check-cookie",
+        },
+        {
+          type: "advance_time",
+          ms: 600,
+        },
+        {
+          type: "replay",
+          target: "check-cookie",
+        },
+      ],
+    });
+
+    const checkBeforeAdvance = result.steps[1];
+    // 2 ステップ目は request なので cookie 付きレスポンスが読める。
+    if (!checkBeforeAdvance || checkBeforeAdvance.type !== "request") {
+      throw new Error("Expected second step to be a request step");
+    }
+
+    const checkAfterFirstAdvance = result.steps[3];
+    // 4 ステップ目は replay なので同じ request を時間だけ変えて検証する。
+    if (!checkAfterFirstAdvance || checkAfterFirstAdvance.type !== "replay") {
+      throw new Error("Expected fourth step to be a replay step");
+    }
+
+    const checkAfterExpiry = result.steps[5];
+    // 6 ステップ目も replay で、期限切れ後に cookie が消えることを確認する。
+    if (!checkAfterExpiry || checkAfterExpiry.type !== "replay") {
+      throw new Error("Expected sixth step to be a replay step");
+    }
+
+    expect(await checkBeforeAdvance.response.text()).toContain("timeline=alive");
+    expect(await checkAfterFirstAdvance.response.text()).toContain("timeline=alive");
+    expect(await checkAfterExpiry.response.text()).toBe("none");
+    expect(
+      result.nextState.trace.some(
+        (event) => event.type === "cookie_expired" && event.name === "timeline",
+      ),
+    ).toBe(true);
+  });
+
   it("expires cookies after advance_time and stops sending them", async () => {
     const loader = async ({ request }: { request: Request }): Promise<Response> => {
       const step = new URL(request.url).searchParams.get("step");

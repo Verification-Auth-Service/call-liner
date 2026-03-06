@@ -77,4 +77,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("injects named globals for stripped imports", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-loader-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "authorize.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { createState } from "~/utils/crypto.server";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return redirect("/next?state=" + createState());
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const loader = await loadRouteLoaderFromFile(routeFilePath, {
+        redirect: (url, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set("Location", url);
+          return new Response(null, { ...init, status: init?.status ?? 302, headers });
+        },
+        getSession: async () => ({ get: () => undefined, set: () => undefined }),
+        commitSession: async () => "session=test; Path=/",
+        globals: {
+          createState: () => "state-from-global",
+        },
+      });
+
+      const response = await loader({
+        request: new Request("https://example.test/auth"),
+      });
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe("/next?state=state-from-global");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
