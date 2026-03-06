@@ -1,6 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { loadRouteLoaderFromFile, type SessionLike } from "./load-route-loader-from-file";
-import { createPhase1SandboxState, type SandboxFetchStub } from "./phase1";
+import {
+  createSandboxState as createPhase1SandboxState,
+  type SandboxFetchStub,
+} from "./runtime";
 import {
   runPhase4Sandbox,
   type Phase4CallbackStateStrategy,

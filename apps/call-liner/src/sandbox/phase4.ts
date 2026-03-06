@@ -1,11 +1,11 @@
 import {
-  runLoaderInPhase1Sandbox,
+  runLoaderInSandbox as runLoaderInPhase1Sandbox,
   type LoaderRequestInput,
   type RunLoaderInSandboxResult,
   type SandboxFetchStub,
   type SandboxLoader,
   type SandboxState,
-} from "./phase1";
+} from "./runtime";
 
 export type Phase4CallbackStateStrategy =
   | "match_authorize"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPhase1SandboxState } from "./phase1";
+import { createSandboxState as createPhase1SandboxState } from "./runtime";
 import { runPhase4Sandbox } from "./phase4";
 
 describe("phase4 sandbox", () => {
