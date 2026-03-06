@@ -535,6 +535,10 @@ describe("run", () => {
         path.join(tempRoot, "report", "action-space.json"),
         "utf8",
       );
+      const attackDslRaw = await readFile(
+        path.join(tempRoot, "report", "attack-dsl.json"),
+        "utf8",
+      );
       const astData = JSON.parse(astDataRaw) as {
         version: number;
         reports: Array<{ entryType: string; sourcePath: string }>;
@@ -542,6 +546,10 @@ describe("run", () => {
       const actionSpace = JSON.parse(actionSpaceRaw) as {
         version: number;
         summary: { entrypoints: number };
+      };
+      const attackDsl = JSON.parse(attackDslRaw) as {
+        version: number;
+        summary: { callbackEntrypoints: number; scenarios: number };
       };
 
       expect(astData.version).toBe(1);
@@ -552,6 +560,9 @@ describe("run", () => {
       });
       expect(actionSpace.version).toBe(1);
       expect(actionSpace.summary.entrypoints).toBe(0);
+      expect(attackDsl.version).toBe(1);
+      expect(attackDsl.summary.callbackEntrypoints).toBe(0);
+      expect(attackDsl.summary.scenarios).toBe(0);
     } finally {
       if (previousInitCwd === undefined) {
         delete process.env.INIT_CWD;
