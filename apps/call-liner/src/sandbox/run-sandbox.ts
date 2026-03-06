@@ -1,5 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { loadRouteLoaderFromFile } from "./load-route-loader-from-file";
+import {
+  buildDatabaseStrategyGlobals,
+  type DatabaseStubStrategyName,
+} from "./database-strategy";
 import { createSandboxState } from "./runtime";
 import {
   runSandbox,
@@ -14,6 +18,7 @@ import {
 import {
   applyEnvOverrides,
   buildDefaultFetchStubs,
+  type DefaultFetchStubOverrides,
   createInMemorySession,
   parseKeyValue,
   requireNextValue,
@@ -29,6 +34,10 @@ type ParsedSingleCliArgs = {
   requestId: string;
   sessionEntries: Array<[string, string]>;
   envEntries: Array<[string, string]>;
+  fetchStubOverrides: DefaultFetchStubOverrides;
+  databaseStrategyName: DatabaseStubStrategyName;
+  databaseGlobalName: string;
+  databaseModelNames: string[];
   advanceMsEntries: number[];
   replayTargets: Array<string | number>;
 };
@@ -44,6 +53,10 @@ type ParsedOauthTwoStepCliArgs = {
   callbackState?: string;
   sessionEntries: Array<[string, string]>;
   envEntries: Array<[string, string]>;
+  fetchStubOverrides: DefaultFetchStubOverrides;
+  databaseStrategyName: DatabaseStubStrategyName;
+  databaseGlobalName: string;
+  databaseModelNames: string[];
 };
 
 type ParsedCliArgs = ParsedSingleCliArgs | ParsedOauthTwoStepCliArgs;
@@ -100,6 +113,10 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
   let callbackCode: string | undefined;
   let callbackStateStrategy: OauthCallbackStateStrategy = "match_authorize";
   let callbackState: string | undefined;
+  const fetchStubOverrides: DefaultFetchStubOverrides = {};
+  let databaseStrategyName: DatabaseStubStrategyName = "none";
+  let databaseGlobalName = "db";
+  const databaseModelNames: string[] = [];
 
   const sessionEntries: Array<[string, string]> = [];
   const envEntries: Array<[string, string]> = [];
@@ -235,7 +252,47 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       continue;
     }
 
+    // DB 依存の注入方式を strategy で切り替える。
+    if (arg === "--database-strategy") {
+      databaseStrategyName = parseDatabaseStrategy(
+        requireNextValue(arg, nextValue),
+      );
+      index += 1;
+      continue;
+    }
+
+    // ルート内で参照される DB クライアント変数名を指定する。
+    if (arg === "--database-global") {
+      databaseGlobalName = requireNextValue(arg, nextValue);
+      index += 1;
+      continue;
+    }
+
+    // model delegate 名を複数指定して、必要なテーブル参照だけ注入する。
+    if (arg === "--database-model") {
+      databaseModelNames.push(requireNextValue(arg, nextValue));
+      index += 1;
+      continue;
+    }
+
+    // OAuth token スタブへ refresh_token を含めたい場合に上書きする。
+    if (arg === "--stub-refresh-token") {
+      fetchStubOverrides.githubRefreshToken = requireNextValue(arg, nextValue);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  // none 戦略で DB 用オプションが渡ると期待が曖昧なため拒否する。
+  if (
+    databaseStrategyName === "none" &&
+    (databaseGlobalName !== "db" || databaseModelNames.length > 0)
+  ) {
+    throw new Error(
+      "--database-global and --database-model require --database-strategy memory-client.",
+    );
   }
 
   const hasOauthSpecificArgs =
@@ -279,6 +336,10 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       requestId,
       sessionEntries,
       envEntries,
+      fetchStubOverrides,
+      databaseStrategyName,
+      databaseGlobalName,
+      databaseModelNames,
       advanceMsEntries,
       replayTargets,
     };
@@ -329,6 +390,10 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
     callbackState,
     sessionEntries,
     envEntries,
+    fetchStubOverrides,
+    databaseStrategyName,
+    databaseGlobalName,
+    databaseModelNames,
   };
 };
 
@@ -368,6 +433,17 @@ const parseStateMode = (raw: string): OauthCallbackStateStrategy => {
   );
 };
 
+const parseDatabaseStrategy = (raw: string): DatabaseStubStrategyName => {
+  // strategy 指定は既知値のみ許可し、注入挙動を一意にする。
+  if (raw === "none" || raw === "memory-client") {
+    return raw;
+  }
+
+  throw new Error(
+    `Unknown database strategy: ${raw}. Expected one of none, memory-client`,
+  );
+};
+
 const runSingleScenario = async (
   parsed: ParsedSingleCliArgs,
   sessionRecord: Map<string, unknown>,
@@ -390,6 +466,11 @@ const runSingleScenario = async (
     getSession: async () => createInMemorySession(sessionRecord),
     commitSession: async (session, options) =>
       toSetCookieHeader(sessionRecord, session, options?.maxAge),
+    globals: buildDatabaseStrategyGlobals({
+      strategyName: parsed.databaseStrategyName,
+      globalName: parsed.databaseGlobalName,
+      modelNames: parsed.databaseModelNames,
+    }),
   });
 
   const operations = buildSandboxOperations(parsed);
@@ -437,7 +518,14 @@ const runOauthTwoStepScenario = async (
     getSession: async () => createInMemorySession(sessionRecord),
     commitSession: async (session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void }, options?: { maxAge?: number }) =>
       toSetCookieHeader(sessionRecord, session, options?.maxAge),
-    globals: buildDefaultSandboxGlobals(),
+    globals: {
+      ...buildDefaultSandboxGlobals(),
+      ...buildDatabaseStrategyGlobals({
+        strategyName: parsed.databaseStrategyName,
+        globalName: parsed.databaseGlobalName,
+        modelNames: parsed.databaseModelNames,
+      }),
+    },
   };
   const authorizeLoader = await loadRouteLoaderFromFile(
     parsed.authorizeLoaderFile,
@@ -460,8 +548,8 @@ const runOauthTwoStepScenario = async (
     callbackCode: parsed.callbackCode,
     callbackStateStrategy: parsed.callbackStateStrategy,
     fixedCallbackState: parsed.callbackState,
-    authorizeFetchStubs: buildDefaultFetchStubs(),
-    callbackFetchStubs: buildDefaultFetchStubs(),
+    authorizeFetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    callbackFetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
   });
 
   return {
@@ -511,7 +599,7 @@ const buildSandboxOperations = (parsed: ParsedSingleCliArgs): SandboxOperation[]
         url: parsed.url,
         method: parsed.method,
       },
-      fetchStubs: buildDefaultFetchStubs(),
+      fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
     },
   ];
 

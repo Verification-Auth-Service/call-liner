@@ -1,6 +1,7 @@
 import type {
   ActionSpaceEntrypoint,
   ActionSpaceExternalIo,
+  ActionSpaceGuard,
   ActionSpaceReport,
 } from "./build-action-space-report";
 
@@ -46,13 +47,37 @@ export type AttackDslScenario = {
   expectedPolicyIds: string[];
 };
 
+export type AttackDslFindingCategory = "inconclusive" | "missing_or_suspect";
+
+export type AttackDslRecommendedAction =
+  | "add_annotations"
+  | "rewrite_to_framework_convention"
+  | "manual_minimum_dsl_completion"
+  | "fix_implementation_gap";
+
+export type AttackDslFinding = {
+  id: string;
+  entrypointId: string;
+  routePath: string;
+  category: AttackDslFindingCategory;
+  title: string;
+  detail: string;
+  recommendedAction: AttackDslRecommendedAction;
+};
+
 export type AttackDslReport = {
   version: 1;
   generatedAt: string;
   summary: {
     callbackEntrypoints: number;
     scenarios: number;
+    generated: number;
+    inconclusive: number;
+    missingOrSuspect: number;
   };
+  generated: AttackDslScenario[];
+  inconclusive: AttackDslFinding[];
+  missingOrSuspect: AttackDslFinding[];
   scenarios: AttackDslScenario[];
 };
 
@@ -64,6 +89,21 @@ type BuildAttackDslReportOptions = {
 type CallbackIoSignals = {
   tokenEndpoint?: string;
   resourceEndpoint?: string;
+};
+
+type EntrypointAnalysisSignals = {
+  hasStateComparison: boolean;
+  hasStateSessionRead: boolean;
+  hasVerifierSessionRead: boolean;
+  hasVerifierSessionWrite: boolean;
+  hasTokenEndpointFetch: boolean;
+  hasResourceFetch: boolean;
+  hasBearerFetch: boolean;
+  hasAccessTokenSessionWrite: boolean;
+  hasExpiryCheck: boolean;
+  hasAudienceCheck: boolean;
+  hasIssuerCheck: boolean;
+  hasTokenPresenceGuard: boolean;
 };
 
 const ADVANCE_EXPIRY_MS = 610_000;
@@ -110,6 +150,221 @@ function collectCallbackIoSignals(
   }
 
   return signals;
+}
+
+function includesAnyKeyword(text: string | undefined, keywords: string[]): boolean {
+  // 判定対象テキストが無い場合はキーワード一致を評価できないため false を返す。
+  if (!text) {
+    return false;
+  }
+
+  const normalized = text.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
+}
+
+function toEntrypointAnalysisSignals(
+  entrypointId: string,
+  guards: ActionSpaceGuard[],
+  externalIo: ActionSpaceExternalIo[],
+): EntrypointAnalysisSignals {
+  const entrypointGuards = guards.filter((guard) => guard.entrypointId === entrypointId);
+  const entrypointIo = externalIo.filter((io) => io.entrypointId === entrypointId);
+  const stateComparisonGuard = entrypointGuards.some(
+    (guard) =>
+      guard.tags.includes("mismatch_validation") &&
+      includesAnyKeyword(guard.condition, ["state"]),
+  );
+  const stateSessionReadIo = entrypointIo.some(
+    (io) =>
+      io.ioType === "session_read" &&
+      includesAnyKeyword(
+        typeof io.detail.key === "string" ? io.detail.key : undefined,
+        ["state"],
+      ),
+  );
+  const verifierSessionReadIo = entrypointIo.some(
+    (io) =>
+      io.ioType === "session_read" &&
+      includesAnyKeyword(
+        typeof io.detail.key === "string" ? io.detail.key : undefined,
+        ["verifier", "code_verifier"],
+      ),
+  );
+  const verifierSessionWriteIo = entrypointIo.some(
+    (io) =>
+      io.ioType === "session_write" &&
+      includesAnyKeyword(
+        typeof io.detail.key === "string" ? io.detail.key : undefined,
+        ["verifier", "code_verifier"],
+      ),
+  );
+  const tokenEndpointFetchIo = entrypointIo.some(
+    (io) => io.ioType === "fetch" && io.detail.tokenEndpoint === true,
+  );
+  const resourceFetchIo = entrypointIo.some(
+    (io) => io.ioType === "fetch" && io.detail.resourceApi === true,
+  );
+  const bearerFetchIo = entrypointIo.some(
+    (io) => io.ioType === "fetch" && io.detail.hasBearer === true,
+  );
+  const accessTokenSessionWriteIo = entrypointIo.some(
+    (io) =>
+      io.ioType === "session_write" &&
+      includesAnyKeyword(
+        typeof io.detail.key === "string" ? io.detail.key : undefined,
+        ["access_token", "accesstoken", "token"],
+      ),
+  );
+  const expiryGuard = entrypointGuards.some((guard) =>
+    includesAnyKeyword(guard.condition, ["exp", "expires", "expiry"]),
+  );
+  const audienceGuard = entrypointGuards.some((guard) =>
+    includesAnyKeyword(guard.condition, ["aud", "audience"]),
+  );
+  const issuerGuard = entrypointGuards.some((guard) =>
+    includesAnyKeyword(guard.condition, ["iss", "issuer"]),
+  );
+  const tokenPresenceGuard = entrypointGuards.some(
+    (guard) =>
+      guard.tags.includes("token_absent") ||
+      includesAnyKeyword(guard.condition, ["accessToken", "refreshToken", "Bearer"]),
+  );
+
+  return {
+    hasStateComparison: stateComparisonGuard,
+    hasStateSessionRead: stateSessionReadIo,
+    hasVerifierSessionRead: verifierSessionReadIo,
+    hasVerifierSessionWrite: verifierSessionWriteIo,
+    hasTokenEndpointFetch: tokenEndpointFetchIo,
+    hasResourceFetch: resourceFetchIo,
+    hasBearerFetch: bearerFetchIo,
+    hasAccessTokenSessionWrite: accessTokenSessionWriteIo,
+    hasExpiryCheck: expiryGuard,
+    hasAudienceCheck: audienceGuard,
+    hasIssuerCheck: issuerGuard,
+    hasTokenPresenceGuard: tokenPresenceGuard,
+  };
+}
+
+function buildInconclusiveFindingsForEntrypoint(
+  entrypoint: ActionSpaceEntrypoint,
+  routePath: string,
+  signals: EntrypointAnalysisSignals,
+): AttackDslFinding[] {
+  const findings: AttackDslFinding[] = [];
+
+  // token exchange の痕跡はあるが verifier 連携の閉路は静的解析だけでは確定できない。
+  if (signals.hasTokenEndpointFetch && signals.hasVerifierSessionRead) {
+    findings.push({
+      id: `${entrypoint.id}-pkce-flow-inconclusive`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "inconclusive",
+      title: "PKCE verifier の token exchange 接続が解析不能",
+      detail:
+        "PKCE verifier の参照と token exchange 呼び出しは検出されましたが、同一リクエストへ接続されるデータフローを静的解析で確定できません。",
+      recommendedAction: "manual_minimum_dsl_completion",
+    });
+  }
+
+  // Bearer 検証っぽいガードがあっても aud/iss/exp の網羅性は別軸で確認が必要。
+  if (
+    (signals.hasBearerFetch || signals.hasTokenPresenceGuard) &&
+    (!signals.hasAudienceCheck || !signals.hasIssuerCheck || !signals.hasExpiryCheck)
+  ) {
+    findings.push({
+      id: `${entrypoint.id}-bearer-claims-inconclusive`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "inconclusive",
+      title: "Bearer 検証の aud/iss/exp 網羅が解析不能",
+      detail:
+        "Bearer token 取り扱いの痕跡は検出されましたが、audience / issuer / expiry の全検証が同一路線で実装されているか静的解析では確定できません。",
+      recommendedAction: "add_annotations",
+    });
+  }
+
+  return findings;
+}
+
+function buildMissingOrSuspectFindingsForCallbackEntrypoint(
+  entrypoint: ActionSpaceEntrypoint,
+  routePath: string,
+  signals: EntrypointAnalysisSignals,
+): AttackDslFinding[] {
+  const findings: AttackDslFinding[] = [];
+
+  // callback で state 比較が見えない場合は CSRF 防御欠落の疑いが高い。
+  if (!signals.hasStateComparison) {
+    findings.push({
+      id: `${entrypoint.id}-state-compare-missing`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "missing_or_suspect",
+      title: "callback に state 比較が見当たりません",
+      detail:
+        "callback エンドポイントは検出されましたが、query state と session state を比較するガードが確認できません。",
+      recommendedAction: "fix_implementation_gap",
+    });
+  }
+
+  // verifier を保存しているのに callback 側で読まない場合は PKCE 不備の疑いが高い。
+  if (signals.hasVerifierSessionWrite && !signals.hasVerifierSessionRead) {
+    findings.push({
+      id: `${entrypoint.id}-verifier-read-missing`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "missing_or_suspect",
+      title: "PKCE verifier 保存後の参照が見当たりません",
+      detail:
+        "session への verifier 保存は検出されましたが、callback で verifier を参照する処理が確認できません。",
+      recommendedAction: "fix_implementation_gap",
+    });
+  }
+
+  // token exchange があるのに verifier 参照が無い場合は PKCE バインディング不足が疑われる。
+  if (signals.hasTokenEndpointFetch && !signals.hasVerifierSessionRead) {
+    findings.push({
+      id: `${entrypoint.id}-token-exchange-without-verifier`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "missing_or_suspect",
+      title: "token exchange に対する verifier 参照が見当たりません",
+      detail:
+        "token exchange への HTTP 呼び出しは検出されましたが、code_verifier の読み出しや検証経路が確認できません。",
+      recommendedAction: "fix_implementation_gap",
+    });
+  }
+
+  // access token を保存しているのに exp 系ガードが無い場合は有効期限検証漏れの疑いがある。
+  if (signals.hasAccessTokenSessionWrite && !signals.hasExpiryCheck) {
+    findings.push({
+      id: `${entrypoint.id}-token-expiry-check-missing`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "missing_or_suspect",
+      title: "access token の exp 検証が見当たりません",
+      detail:
+        "access token の受領・保存は検出されましたが、exp / expires の検証ガードが確認できません。",
+      recommendedAction: "fix_implementation_gap",
+    });
+  }
+
+  // state 読み取り自体が無い場合は framework 抽象化の影響を疑うため規約寄り修正を推奨する。
+  if (!signals.hasStateSessionRead) {
+    findings.push({
+      id: `${entrypoint.id}-state-read-weak`,
+      entrypointId: entrypoint.id,
+      routePath,
+      category: "missing_or_suspect",
+      title: "state 読み取りの根拠が弱く callback 保護が不明瞭です",
+      detail:
+        "session から state を読む操作が検出されず、検証ロジックがフレームワーク規約外に隠れている可能性があります。",
+      recommendedAction: "rewrite_to_framework_convention",
+    });
+  }
+
+  return findings;
 }
 
 function buildBaseSession(overrides?: Record<string, string>): Record<string, string> {
@@ -454,12 +709,31 @@ export function buildAttackDslReport(
     entrypoint.endpointKinds.includes("callback"),
   );
   const scenarios: AttackDslScenario[] = [];
+  const inconclusive: AttackDslFinding[] = [];
+  const missingOrSuspect: AttackDslFinding[] = [];
 
   for (const entrypoint of callbackEntrypoints) {
+    const routePath = toDefaultRoutePath(entrypoint);
+    const signals = toEntrypointAnalysisSignals(
+      entrypoint.id,
+      options.actionSpace.guards,
+      options.actionSpace.externalIo,
+    );
+
     scenarios.push(
       ...buildScenariosForCallbackEntrypoint(entrypoint, {
         externalIo: options.actionSpace.externalIo,
       }),
+    );
+    inconclusive.push(
+      ...buildInconclusiveFindingsForEntrypoint(entrypoint, routePath, signals),
+    );
+    missingOrSuspect.push(
+      ...buildMissingOrSuspectFindingsForCallbackEntrypoint(
+        entrypoint,
+        routePath,
+        signals,
+      ),
     );
   }
 
@@ -469,7 +743,13 @@ export function buildAttackDslReport(
     summary: {
       callbackEntrypoints: callbackEntrypoints.length,
       scenarios: scenarios.length,
+      generated: scenarios.length,
+      inconclusive: inconclusive.length,
+      missingOrSuspect: missingOrSuspect.length,
     },
+    generated: scenarios,
+    inconclusive,
+    missingOrSuspect,
     scenarios,
   };
 }

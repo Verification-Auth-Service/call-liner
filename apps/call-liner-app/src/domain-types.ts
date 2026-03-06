@@ -52,9 +52,37 @@ export type AttackDslScenario = {
   expectedPolicyIds: string[];
 };
 
+export type AttackDslFindingCategory = "inconclusive" | "missing_or_suspect";
+
+export type AttackDslRecommendedAction =
+  | "add_annotations"
+  | "rewrite_to_framework_convention"
+  | "manual_minimum_dsl_completion"
+  | "fix_implementation_gap";
+
+export type AttackDslFinding = {
+  id: string;
+  entrypointId: string;
+  routePath: string;
+  category: AttackDslFindingCategory;
+  title: string;
+  detail: string;
+  recommendedAction: AttackDslRecommendedAction;
+};
+
 export type AttackDslReport = {
   version: 1;
   generatedAt: string;
+  summary?: {
+    callbackEntrypoints: number;
+    scenarios: number;
+    generated: number;
+    inconclusive: number;
+    missingOrSuspect: number;
+  };
+  generated?: AttackDslScenario[];
+  inconclusive?: AttackDslFinding[];
+  missingOrSuspect?: AttackDslFinding[];
   scenarios: AttackDslScenario[];
 };
 

@@ -1,6 +1,11 @@
 import type { SessionLike } from "./load-route-loader-from-file";
 import type { SandboxFetchStub } from "./runtime";
 
+export type DefaultFetchStubOverrides = {
+  githubAccessToken?: string;
+  githubRefreshToken?: string;
+};
+
 /**
  * CLI フラグの次値を取得し、未指定なら説明付きで失敗させる。
  *
@@ -133,24 +138,19 @@ export const restoreEnvOverrides = (
  * 出力例:
  * - access_token/user API 用スタブ 2 件
  */
-export const buildDefaultFetchStubs = (): SandboxFetchStub[] => {
+export const buildDefaultFetchStubs = (
+  overrides?: DefaultFetchStubOverrides,
+): SandboxFetchStub[] => {
   return [
     {
       matcher: "https://github.com/login/oauth/access_token",
       response: () =>
-        new Response(
-          JSON.stringify({
-            access_token: "sandbox-access-token",
-            token_type: "bearer",
-            scope: "read:user",
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
+        new Response(JSON.stringify(buildTokenResponseBody(overrides)), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
           },
-        ),
+        }),
     },
     {
       matcher: "https://api.github.com/user",
@@ -169,4 +169,21 @@ export const buildDefaultFetchStubs = (): SandboxFetchStub[] => {
         ),
     },
   ];
+};
+
+const buildTokenResponseBody = (
+  overrides?: DefaultFetchStubOverrides,
+): Record<string, unknown> => {
+  const body: Record<string, unknown> = {
+    access_token: overrides?.githubAccessToken ?? "sandbox-access-token",
+    token_type: "bearer",
+    scope: "read:user",
+  };
+
+  // refresh token を明示指定した場合だけレスポンスへ含める。
+  if (overrides?.githubRefreshToken) {
+    body.refresh_token = overrides.githubRefreshToken;
+  }
+
+  return body;
 };

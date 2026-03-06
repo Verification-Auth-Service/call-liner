@@ -1,6 +1,7 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import type {
   ActionSpaceReport,
+  AttackDslFinding,
   AttackDslOperation,
   AttackDslReport,
   AttackDslScenario,
@@ -34,6 +35,20 @@ function toOperationDetail(operation: AttackDslOperation): string {
 
 async function readTextFile(file: File): Promise<string> {
   return file.text();
+}
+
+function toRecommendedActionLabel(finding: AttackDslFinding): string {
+  // 推奨アクションコードを UI で読める日本語ラベルへ変換する。
+  switch (finding.recommendedAction) {
+    case "add_annotations":
+      return "追加の注釈を書くべき";
+    case "rewrite_to_framework_convention":
+      return "フレームワーク規約に沿って書き直すべき";
+    case "manual_minimum_dsl_completion":
+      return "最低要件DSLを手動で補完すべき";
+    case "fix_implementation_gap":
+      return "実装不備として修正すべき";
+  }
 }
 
 /**
@@ -89,6 +104,16 @@ export default function App() {
   const board: TimelineBoard = useMemo(() => {
     return buildTimelineBoard(selectedScenario, selectedFlow);
   }, [selectedScenario, selectedFlow]);
+  const selectedEntrypointInconclusive = useMemo(() => {
+    return (attackDslReport.inconclusive ?? []).filter(
+      (finding) => finding.entrypointId === selectedScenario.entrypointId,
+    );
+  }, [attackDslReport.inconclusive, selectedScenario.entrypointId]);
+  const selectedEntrypointMissingOrSuspect = useMemo(() => {
+    return (attackDslReport.missingOrSuspect ?? []).filter(
+      (finding) => finding.entrypointId === selectedScenario.entrypointId,
+    );
+  }, [attackDslReport.missingOrSuspect, selectedScenario.entrypointId]);
 
   const ticks = useMemo(() => {
     const generated: Array<{ timeMs: number; major: boolean }> = [];
@@ -246,6 +271,11 @@ export default function App() {
 
         <aside className="panel panel-inspector" aria-label="inspector">
           <h2>Inspector</h2>
+          <div className="report-summary">
+            <span>Generated: {attackDslReport.summary?.generated ?? attackDslReport.scenarios.length}</span>
+            <span>Inconclusive: {attackDslReport.summary?.inconclusive ?? 0}</span>
+            <span>Missing/Suspect: {attackDslReport.summary?.missingOrSuspect ?? 0}</span>
+          </div>
           <p className="scenario-title">{selectedScenario.title}</p>
           <p>{selectedScenario.description}</p>
           <h3>Operations</h3>
@@ -278,6 +308,36 @@ export default function App() {
           ) : (
             <p>対応する authorize + callback flow は未検出</p>
           )}
+
+          <h3>Inconclusive</h3>
+          <ul className="finding-list">
+            {selectedEntrypointInconclusive.length > 0 ? (
+              selectedEntrypointInconclusive.map((finding) => (
+                <li key={finding.id}>
+                  <b>{finding.title}</b>
+                  <span>{finding.detail}</span>
+                  <small>Next: {toRecommendedActionLabel(finding)}</small>
+                </li>
+              ))
+            ) : (
+              <li>該当なし</li>
+            )}
+          </ul>
+
+          <h3>Missing / Suspect</h3>
+          <ul className="finding-list">
+            {selectedEntrypointMissingOrSuspect.length > 0 ? (
+              selectedEntrypointMissingOrSuspect.map((finding) => (
+                <li key={finding.id}>
+                  <b>{finding.title}</b>
+                  <span>{finding.detail}</span>
+                  <small>Next: {toRecommendedActionLabel(finding)}</small>
+                </li>
+              ))
+            ) : (
+              <li>該当なし</li>
+            )}
+          </ul>
         </aside>
       </section>
     </main>

@@ -251,6 +251,13 @@ body {
   padding: 10px 12px;
 }
 
+.report-summary {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .scenario-title {
   font-weight: 600;
 }
@@ -271,6 +278,25 @@ body {
 }
 
 .operation-list small {
+  color: var(--muted);
+}
+
+.finding-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.finding-list li {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid #4b4f55;
+  border-radius: 4px;
+  background: #2f3236;
+}
+
+.finding-list small {
   color: var(--muted);
 }
 
