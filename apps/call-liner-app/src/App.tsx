@@ -1,79 +1,295 @@
-import { buildTickMarks, sampleTimelineData } from "./timeline-model";
+import { useMemo, useState, type ChangeEvent } from "react";
+import type {
+  ActionSpaceReport,
+  AttackDslOperation,
+  AttackDslReport,
+  AttackDslScenario,
+  Phase4Flow,
+  TimelineBoard,
+} from "./domain-types";
+import {
+  buildTimelineBoard,
+  derivePhase4Flows,
+  parseActionSpaceReportText,
+  parseAttackDslReportText,
+} from "./report-integration";
+import { sampleActionSpaceReport, sampleAttackDslReport } from "./sample-reports";
 import "./styles.css";
 
-const PIXELS_PER_UNIT = 1;
+const TICK_STEP_MS = 100;
+const MAJOR_TICK_STEP_MS = 500;
+const PIXELS_PER_MS = 1;
+
+function toOperationDetail(operation: AttackDslOperation): string {
+  // 種別ごとに有効なプロパティが異なるため表示文言を分ける。
+  switch (operation.type) {
+    case "request":
+      return `${operation.request.method} ${operation.request.url}`;
+    case "advance_time":
+      return `Advance ${operation.ms}ms`;
+    case "replay":
+      return `Replay target: ${operation.target}`;
+  }
+}
+
+async function readTextFile(file: File): Promise<string> {
+  return file.text();
+}
 
 /**
- * タイムライン画面を描画する。
+ * Phase 1-4 統合結果をタイムラインで検証する GUI を表示する。
  * 入力例: `<App />`
- * 出力例: 画像テイストに寄せたダーク系のタイムライン DOM を返す。
+ * 出力例: シナリオ選択、フロー検出、時間軸クリップ表示を含む React 画面。
  */
 export default function App() {
-  const data = sampleTimelineData;
-  const timelineWidth = data.maxTime * PIXELS_PER_UNIT;
-  const ticks = buildTickMarks(data.maxTime, data.tickStep, data.majorStep);
+  const [attackDslReport, setAttackDslReport] =
+    useState<AttackDslReport>(sampleAttackDslReport);
+  const [actionSpaceReport, setActionSpaceReport] =
+    useState<ActionSpaceReport>(sampleActionSpaceReport);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string>(
+    sampleAttackDslReport.scenarios[0]?.id ?? "",
+  );
+  const [parseError, setParseError] = useState<string>("");
+
+  const phase4Flows = useMemo(() => {
+    return derivePhase4Flows(actionSpaceReport);
+  }, [actionSpaceReport]);
+
+  const selectedScenario: AttackDslScenario = useMemo(() => {
+    const fallback = attackDslReport.scenarios[0];
+
+    // シナリオ自体が空なら画面継続できないため明示エラーにする。
+    if (!fallback) {
+      throw new Error("No scenarios found in attack-dsl report.");
+    }
+
+    // 選択IDが空のときは先頭シナリオを既定値として使う。
+    if (!selectedScenarioId) {
+      return fallback;
+    }
+
+    const found = attackDslReport.scenarios.find(
+      (scenario) => scenario.id === selectedScenarioId,
+    );
+
+    // 以前の選択IDが現在レポートに存在しない場合は先頭へフォールバックする。
+    if (!found) {
+      return fallback;
+    }
+
+    return found;
+  }, [attackDslReport, selectedScenarioId]);
+
+  const selectedFlow: Phase4Flow | undefined = useMemo(() => {
+    return phase4Flows.find(
+      (flow) => flow.callbackEntrypointId === selectedScenario.entrypointId,
+    );
+  }, [phase4Flows, selectedScenario.entrypointId]);
+
+  const board: TimelineBoard = useMemo(() => {
+    return buildTimelineBoard(selectedScenario, selectedFlow);
+  }, [selectedScenario, selectedFlow]);
+
+  const ticks = useMemo(() => {
+    const generated: Array<{ timeMs: number; major: boolean }> = [];
+
+    for (let timeMs = TICK_STEP_MS; timeMs <= board.maxMs; timeMs += TICK_STEP_MS) {
+      generated.push({
+        timeMs,
+        major: timeMs % MAJOR_TICK_STEP_MS === 0,
+      });
+    }
+
+    return generated;
+  }, [board.maxMs]);
+
+  const onLoadAttackDsl = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+
+    // ファイル未選択のときは入力確定していないため処理しない。
+    if (!file) {
+      return;
+    }
+
+    try {
+      const parsed = parseAttackDslReportText(await readTextFile(file));
+      setAttackDslReport(parsed);
+      setSelectedScenarioId(parsed.scenarios[0]?.id ?? "");
+      setParseError("");
+    } catch (error) {
+      setParseError((error as Error).message);
+    }
+  };
+
+  const onLoadActionSpace = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+
+    // ファイル未選択のときは入力確定していないため処理しない。
+    if (!file) {
+      return;
+    }
+
+    try {
+      const parsed = parseActionSpaceReportText(await readTextFile(file));
+      setActionSpaceReport(parsed);
+      setParseError("");
+    } catch (error) {
+      setParseError((error as Error).message);
+    }
+  };
 
   return (
-    <main className="timeline-root">
-      <section className="timeline-frame" aria-label="timeline-board">
-        <header className="timeline-ruler" style={{ width: timelineWidth }}>
-          {ticks.map((tick) => {
-            return (
-              <span
-                key={tick.time}
-                className={`tick-label ${tick.isMajor ? "major" : "minor"}`}
-                style={{ left: tick.time * PIXELS_PER_UNIT }}
-              >
-                {tick.time}
-              </span>
-            );
-          })}
-          <span
-            className="cursor-badge"
-            style={{ left: data.cursorTime * PIXELS_PER_UNIT }}
-          >
-            {data.cursorTime}
-          </span>
-        </header>
-
-        <div className="timeline-canvas" style={{ width: timelineWidth }}>
-          <span
-            className="cursor-line"
-            style={{ left: data.cursorTime * PIXELS_PER_UNIT }}
-            aria-label="current-time"
-          />
-
-          {data.lanes.map((lane) => {
-            return (
-              <article key={lane.id} className="lane" aria-label={lane.name}>
-                <span className="lane-title">{lane.name}</span>
-
-                {lane.segments.map((segment) => {
-                  return (
-                    <span
-                      key={segment.id}
-                      className={`segment ${segment.tone}`}
-                      style={{
-                        left: segment.start * PIXELS_PER_UNIT,
-                        width: (segment.end - segment.start) * PIXELS_PER_UNIT,
-                      }}
-                    />
-                  );
-                })}
-
-                {lane.markers.map((marker) => {
-                  return (
-                    <span
-                      key={marker.id}
-                      className="marker"
-                      style={{ left: marker.time * PIXELS_PER_UNIT }}
-                    />
-                  );
-                })}
-              </article>
-            );
-          })}
+    <main className="app-root">
+      <header className="app-header">
+        <div>
+          <h1>Call Liner Timeline Lab</h1>
+          <p>
+            Phase 1-4 を統合し、Operation を時間軸で検証する GUI
+          </p>
         </div>
+        <div className="file-controls">
+          <label>
+            attack-dsl.json
+            <input type="file" accept="application/json" onChange={onLoadAttackDsl} />
+          </label>
+          <label>
+            action-space.json
+            <input type="file" accept="application/json" onChange={onLoadActionSpace} />
+          </label>
+        </div>
+      </header>
+
+      {parseError ? <p className="error-banner">{parseError}</p> : null}
+
+      <section className="workspace-grid">
+        <aside className="panel panel-scenarios" aria-label="scenario-list">
+          <h2>Scenarios (Phase 3)</h2>
+          <ul>
+            {attackDslReport.scenarios.map((scenario) => {
+              const isActive = selectedScenarioId === scenario.id;
+
+              return (
+                <li key={scenario.id}>
+                  <button
+                    type="button"
+                    className={isActive ? "active" : ""}
+                    onClick={() => setSelectedScenarioId(scenario.id)}
+                  >
+                    <span>{scenario.title}</span>
+                    <small>{scenario.routePath}</small>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+
+        <section className="panel panel-timeline" aria-label="timeline-board">
+          <header className="timeline-ruler" style={{ width: board.maxMs * PIXELS_PER_MS }}>
+            {ticks.map((tick) => {
+              return (
+                <span
+                  key={tick.timeMs}
+                  className={`tick-label ${tick.major ? "major" : "minor"}`}
+                  style={{ left: tick.timeMs * PIXELS_PER_MS }}
+                >
+                  {tick.timeMs}
+                </span>
+              );
+            })}
+            <span
+              className="cursor-badge"
+              style={{ left: board.cursorMs * PIXELS_PER_MS }}
+            >
+              {board.cursorMs}
+            </span>
+          </header>
+
+          <div className="timeline-canvas" style={{ width: board.maxMs * PIXELS_PER_MS }}>
+            <span
+              className="cursor-line"
+              style={{ left: board.cursorMs * PIXELS_PER_MS }}
+              aria-label="current-time"
+            />
+
+            {board.lanes.map((lane, laneIndex) => {
+              return (
+                <article key={lane.id} className="lane" aria-label={lane.label}>
+                  <span className="lane-title">{lane.label}</span>
+
+                  {board.clips
+                    .filter((clip) => clip.laneId === lane.id)
+                    .map((clip) => {
+                      return (
+                        <span
+                          key={clip.id}
+                          className={`clip tone-${clip.tone}`}
+                          style={{
+                            top: 42 + laneIndex * 0,
+                            left: clip.startMs * PIXELS_PER_MS,
+                            width: (clip.endMs - clip.startMs) * PIXELS_PER_MS,
+                          }}
+                          title={`${clip.phase}: ${clip.label}`}
+                        >
+                          {clip.label}
+                        </span>
+                      );
+                    })}
+
+                  {board.markers
+                    .filter((marker) => marker.laneId === lane.id)
+                    .map((marker) => {
+                      return (
+                        <span
+                          key={marker.id}
+                          className="marker"
+                          style={{ left: marker.atMs * PIXELS_PER_MS }}
+                        />
+                      );
+                    })}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <aside className="panel panel-inspector" aria-label="inspector">
+          <h2>Inspector</h2>
+          <p className="scenario-title">{selectedScenario.title}</p>
+          <p>{selectedScenario.description}</p>
+          <h3>Operations (Phase 1/2)</h3>
+          <ul className="operation-list">
+            {selectedScenario.operations.map((operation, index) => {
+              return (
+                <li key={`${operation.type}-${index}`}>
+                  <b>{operation.type}</b>
+                  <span>{toOperationDetail(operation)}</span>
+                  <small>{operation.note}</small>
+                </li>
+              );
+            })}
+          </ul>
+
+          <h3>Expected Policies (Phase 3)</h3>
+          <div className="policy-tags">
+            {selectedScenario.expectedPolicyIds.map((policyId) => (
+              <span key={policyId}>{policyId}</span>
+            ))}
+          </div>
+
+          <h3>Two-Step Flow (Phase 4)</h3>
+          {selectedFlow ? (
+            <p>
+              {selectedFlow.authorizePath}
+              {" -> "}
+              {selectedFlow.callbackPath}
+            </p>
+          ) : (
+            <p>対応する authorize + callback flow は未検出</p>
+          )}
+        </aside>
       </section>
     </main>
   );

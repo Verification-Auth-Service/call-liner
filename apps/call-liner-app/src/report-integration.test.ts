@@ -1,0 +1,100 @@
+import { describe, expect, it } from "vitest";
+import type { ActionSpaceReport, AttackDslReport } from "./domain-types";
+import {
+  buildTimelineBoard,
+  derivePhase4Flows,
+  findScenarioById,
+  parseActionSpaceReportText,
+  parseAttackDslReportText,
+} from "./report-integration";
+import { sampleActionSpaceReport, sampleAttackDslReport } from "./sample-reports";
+
+describe("derivePhase4Flows", () => {
+  it("creates authorize + callback pairs", () => {
+    const flows = derivePhase4Flows(sampleActionSpaceReport);
+
+    expect(flows).toEqual([
+      {
+        id: "flow-1",
+        authorizeEntrypointId: "entrypoint-authorize-1",
+        callbackEntrypointId: "entrypoint-callback-1",
+        authorizePath: "/auth+/github+",
+        callbackPath: "/auth+/github+/callback",
+      },
+    ]);
+  });
+
+  it("returns empty list when no route prefixes match", () => {
+    const mismatched: ActionSpaceReport = {
+      version: 1,
+      generatedAt: "",
+      entrypoints: [
+        {
+          id: "authorize-a",
+          routePath: "/auth+/a",
+          endpointKinds: ["authorize_start"],
+        },
+        {
+          id: "callback-b",
+          routePath: "/auth+/b+/callback",
+          endpointKinds: ["callback"],
+        },
+      ],
+    };
+
+    expect(derivePhase4Flows(mismatched)).toEqual([]);
+  });
+});
+
+describe("findScenarioById", () => {
+  it("returns scenario by id", () => {
+    expect(findScenarioById(sampleAttackDslReport, "entrypoint-callback-1-replay").id).toBe(
+      "entrypoint-callback-1-replay",
+    );
+  });
+
+  it("throws when scenario does not exist", () => {
+    expect(() => findScenarioById(sampleAttackDslReport, "missing")).toThrowError(
+      /Scenario was not found/,
+    );
+  });
+});
+
+describe("buildTimelineBoard", () => {
+  it("includes phase3 and phase4 clips", () => {
+    const scenario = findScenarioById(sampleAttackDslReport, "entrypoint-callback-1-replay");
+    const flow = derivePhase4Flows(sampleActionSpaceReport)[0];
+    const board = buildTimelineBoard(scenario, flow);
+
+    expect(board.clips.some((clip) => clip.phase === "phase3")).toBe(true);
+    expect(board.clips.some((clip) => clip.phase === "phase4")).toBe(true);
+    expect(board.markers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("report parsers", () => {
+  it("parses valid reports", () => {
+    const parsedAttack = parseAttackDslReportText(
+      JSON.stringify(sampleAttackDslReport),
+    );
+    const parsedAction = parseActionSpaceReportText(
+      JSON.stringify(sampleActionSpaceReport),
+    );
+
+    expect(parsedAttack.scenarios.length).toBeGreaterThan(0);
+    expect(parsedAction.entrypoints.length).toBeGreaterThan(0);
+  });
+
+  it("throws for invalid report structures", () => {
+    const invalidAttack: Partial<AttackDslReport> = {
+      generatedAt: "",
+      scenarios: [],
+    };
+
+    expect(() => parseAttackDslReportText(JSON.stringify(invalidAttack))).toThrowError(
+      /Invalid attack-dsl report format/,
+    );
+    expect(() => parseActionSpaceReportText("{}"))
+      .toThrowError(/Invalid action-space report format/);
+  });
+});
