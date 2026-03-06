@@ -53,6 +53,10 @@ pnpm typecheck
 pnpm test
 ```
 
+## 設計ドキュメント
+
+- [Timeline Sandbox 実装方針（ドラフト）](docs/timeline-sandbox-implementation-plan.md)
+
 ## AST(JSON) 変換の利用例
 
 `apps/call-liner/src/ast/program-to-ast-json.ts` の `programToAstJson` を利用します。
