@@ -1,11 +1,20 @@
 import { pathToFileURL } from "node:url";
-import { loadRouteLoaderFromFile, type SessionLike } from "./load-route-loader-from-file";
-import { createSandboxState, type SandboxFetchStub } from "./runtime";
+import { loadRouteLoaderFromFile } from "./load-route-loader-from-file";
+import { createSandboxState } from "./runtime";
 import {
   runSandbox,
   type SandboxOperation,
   type SandboxStepResult,
 } from "./executor";
+import {
+  applyEnvOverrides,
+  buildDefaultFetchStubs,
+  createInMemorySession,
+  parseKeyValue,
+  requireNextValue,
+  restoreEnvOverrides,
+  toSetCookieHeader,
+} from "./sandbox-cli-common";
 
 type ParsedCliArgs = {
   loaderFile: string;
@@ -256,118 +265,6 @@ const serializeStepResults = async (
   }
 
   return serialized;
-};
-
-const requireNextValue = (flag: string, value: string | undefined): string => {
-  // フラグ値が無い場合は CLI 入力ミスなので即時に説明付きエラーを返す。
-  if (value === undefined || value.startsWith("--")) {
-    throw new Error(`Missing value for ${flag}`);
-  }
-
-  return value;
-};
-
-const parseKeyValue = (raw: string, flag: string): [string, string] => {
-  const equalIndex = raw.indexOf("=");
-
-  // key=value 形式でない入力は曖昧になるため拒否する。
-  if (equalIndex <= 0) {
-    throw new Error(`Expected key=value for ${flag}, but received: ${raw}`);
-  }
-
-  const key = raw.slice(0, equalIndex);
-  const value = raw.slice(equalIndex + 1);
-  return [key, value];
-};
-
-const createInMemorySession = (sessionRecord: Map<string, unknown>): SessionLike => {
-  return {
-    get: (key: string) => sessionRecord.get(key),
-    set: (key: string, value: unknown) => {
-      sessionRecord.set(key, value);
-    },
-  };
-};
-
-const toSetCookieHeader = (
-  sessionRecord: Map<string, unknown>,
-  _session: SessionLike,
-  maxAge?: number,
-): string => {
-  const payload = JSON.stringify(Object.fromEntries(sessionRecord.entries()));
-  const encoded = Buffer.from(payload, "utf8").toString("base64url");
-  const parts = ["session=" + encoded, "Path=/", "HttpOnly", "SameSite=Lax"];
-
-  // maxAge 指定がある場合だけ Set-Cookie に反映する。
-  if (typeof maxAge === "number") {
-    parts.push(`Max-Age=${maxAge}`);
-  }
-
-  return parts.join("; ");
-};
-
-const applyEnvOverrides = (
-  entries: Array<[string, string]>,
-): Array<[string, string, string | undefined]> => {
-  const originals: Array<[string, string, string | undefined]> = [];
-
-  for (const [key, value] of entries) {
-    originals.push([key, value, process.env[key]]);
-    process.env[key] = value;
-  }
-
-  return originals;
-};
-
-const restoreEnvOverrides = (
-  originals: Array<[string, string, string | undefined]>,
-): void => {
-  for (const [key, , originalValue] of originals) {
-    // 元値が無いキーは削除し、あったキーは復元する。
-    if (originalValue === undefined) {
-      delete process.env[key];
-      continue;
-    }
-    process.env[key] = originalValue;
-  }
-};
-
-const buildDefaultFetchStubs = (): SandboxFetchStub[] => {
-  return [
-    {
-      matcher: "https://github.com/login/oauth/access_token",
-      response: () =>
-        new Response(
-          JSON.stringify({
-            access_token: "sandbox-access-token",
-            token_type: "bearer",
-            scope: "read:user",
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        ),
-    },
-    {
-      matcher: "https://api.github.com/user",
-      response: () =>
-        new Response(
-          JSON.stringify({
-            id: 1,
-            login: "sandbox-user",
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        ),
-    },
-  ];
 };
 
 // 直接実行時のみ CLI を起動し、テスト import 時は副作用を抑える。
