@@ -23,6 +23,22 @@ export type SandboxTraceEvent =
       type: "cookie_set";
       name: string;
       expiresAtMs: number | null;
+    }
+  | {
+      type: "time_advanced";
+      fromMs: number;
+      toMs: number;
+    }
+  | {
+      type: "cookie_expired";
+      name: string;
+      expiredAtMs: number;
+    }
+  | {
+      type: "replay";
+      target: string | number;
+      url: string;
+      method: string;
     };
 
 export type SandboxCookie = {
