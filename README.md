@@ -27,6 +27,12 @@ pnpm dev -- -d --client-entry /path/to/client.tsx --resource-entry /path/to/reso
 
 `--ast-json` を付けると処理向けの集約 JSON (`report/ast-data.json`)、静的解析ベースのアクション空間 (`report/action-space.json`)、攻撃シナリオ DSL (`report/attack-dsl.json`) が出力されます。
 
+`report/attack-dsl.json` には、攻撃 DSL 生成結果と静的解析の警告分類が含まれます。
+
+- `generated`: 攻撃 DSL を正常生成できた観点
+- `inconclusive`: 解析不能で十分な攻撃 DSL を生成できなかった観点
+- `missingOrSuspect`: 必須防御が見当たらず不備の可能性が高い観点
+
 ```bash
 pnpm dev -- --ast-json --client-entry /path/to/client.tsx --resource-entry /path/to/resource.ts
 ```

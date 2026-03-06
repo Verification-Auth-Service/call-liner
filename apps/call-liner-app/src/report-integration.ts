@@ -243,6 +243,30 @@ export function parseAttackDslReportText(text: string): AttackDslReport {
   return {
     version: 1,
     generatedAt: typeof data.generatedAt === "string" ? data.generatedAt : "",
+    summary:
+      data.summary &&
+      typeof data.summary.callbackEntrypoints === "number" &&
+      typeof data.summary.scenarios === "number" &&
+      typeof data.summary.generated === "number" &&
+      typeof data.summary.inconclusive === "number" &&
+      typeof data.summary.missingOrSuspect === "number"
+        ? data.summary
+        : {
+            callbackEntrypoints: 0,
+            scenarios: data.scenarios.length,
+            generated: data.scenarios.length,
+            inconclusive: Array.isArray(data.inconclusive)
+              ? data.inconclusive.length
+              : 0,
+            missingOrSuspect: Array.isArray(data.missingOrSuspect)
+              ? data.missingOrSuspect.length
+              : 0,
+          },
+    generated: Array.isArray(data.generated) ? data.generated : data.scenarios,
+    inconclusive: Array.isArray(data.inconclusive) ? data.inconclusive : [],
+    missingOrSuspect: Array.isArray(data.missingOrSuspect)
+      ? data.missingOrSuspect
+      : [],
     scenarios: data.scenarios,
   };
 }

@@ -82,6 +82,8 @@ describe("report parsers", () => {
     );
 
     expect(parsedAttack.scenarios.length).toBeGreaterThan(0);
+    expect(parsedAttack.summary?.generated).toBe(parsedAttack.scenarios.length);
+    expect(parsedAttack.generated?.length).toBe(parsedAttack.scenarios.length);
     expect(parsedAction.entrypoints.length).toBeGreaterThan(0);
   });
 

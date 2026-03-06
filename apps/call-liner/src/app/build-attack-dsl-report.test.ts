@@ -68,6 +68,19 @@ describe("buildAttackDslReport", () => {
     expect(report.generatedAt).toBe("2026-03-06T01:02:03.000Z");
     expect(report.summary.callbackEntrypoints).toBe(1);
     expect(report.summary.scenarios).toBe(8);
+    expect(report.summary.generated).toBe(8);
+    expect(report.summary.inconclusive).toBe(0);
+    expect(report.summary.missingOrSuspect).toBe(3);
+    expect(report.generated).toHaveLength(8);
+    expect(report.inconclusive).toEqual([]);
+    expect(report.missingOrSuspect.some((finding) => finding.id.endsWith("-state-compare-missing"))).toBe(
+      true,
+    );
+    expect(
+      report.missingOrSuspect.some((finding) =>
+        finding.id.endsWith("-token-exchange-without-verifier"),
+      ),
+    ).toBe(true);
     expect(report.scenarios.some((scenario) => scenario.id.endsWith("-replay"))).toBe(
       true,
     );
@@ -112,7 +125,13 @@ describe("buildAttackDslReport", () => {
 
     expect(report.summary.callbackEntrypoints).toBe(0);
     expect(report.summary.scenarios).toBe(0);
+    expect(report.summary.generated).toBe(0);
+    expect(report.summary.inconclusive).toBe(0);
+    expect(report.summary.missingOrSuspect).toBe(0);
     expect(report.scenarios).toEqual([]);
+    expect(report.generated).toEqual([]);
+    expect(report.inconclusive).toEqual([]);
+    expect(report.missingOrSuspect).toEqual([]);
   });
 
   it("skips token/resource stub scenarios when callback has no endpoint hints", () => {
@@ -125,11 +144,53 @@ describe("buildAttackDslReport", () => {
 
     expect(report.summary.callbackEntrypoints).toBe(1);
     expect(report.summary.scenarios).toBe(5);
+    expect(report.summary.generated).toBe(5);
+    expect(report.summary.inconclusive).toBe(0);
+    expect(report.summary.missingOrSuspect).toBe(2);
     expect(
       report.scenarios.some((scenario) => scenario.id.endsWith("-token-endpoint-failure")),
     ).toBe(false);
     expect(
       report.scenarios.some((scenario) => scenario.id.endsWith("-resource-endpoint-failure")),
     ).toBe(false);
+  });
+
+  it("emits inconclusive findings when verifier read exists but data-flow closure is unknown", () => {
+    const actionSpace = createBaseActionSpace();
+    actionSpace.externalIo = [
+      {
+        id: "io-token",
+        entrypointId: "entrypoint-1",
+        ioType: "fetch",
+        line: 21,
+        detail: {
+          destination: "https://github.com/login/oauth/access_token",
+          tokenEndpoint: true,
+          resourceApi: false,
+        },
+      },
+      {
+        id: "io-verifier-read",
+        entrypointId: "entrypoint-1",
+        ioType: "session_read",
+        line: 12,
+        detail: {
+          method: "get",
+          key: "oauth:verifier",
+        },
+      },
+    ];
+
+    const report = buildAttackDslReport({
+      actionSpace,
+      generatedAt: "2026-03-06T01:02:03.000Z",
+    });
+
+    expect(report.summary.inconclusive).toBe(1);
+    expect(
+      report.inconclusive.some((finding) =>
+        finding.id.endsWith("-pkce-flow-inconclusive"),
+      ),
+    ).toBe(true);
   });
 });
