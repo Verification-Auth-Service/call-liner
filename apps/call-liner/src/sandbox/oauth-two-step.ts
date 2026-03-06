@@ -1,5 +1,5 @@
 import {
-  runLoaderInSandbox as runLoaderInPhase1Sandbox,
+  runLoaderInSandbox,
   type LoaderRequestInput,
   type RunLoaderInSandboxResult,
   type SandboxFetchStub,
@@ -7,13 +7,13 @@ import {
   type SandboxState,
 } from "./runtime";
 
-export type Phase4CallbackStateStrategy =
+export type OauthCallbackStateStrategy =
   | "match_authorize"
   | "tampered"
   | "missing"
   | "fixed";
 
-export type Phase4StepResult = {
+export type OauthTwoStepResult = {
   type: "authorize" | "callback";
   response: Response;
   requestUrl: string;
@@ -21,14 +21,14 @@ export type Phase4StepResult = {
   state: string | null;
 };
 
-export type RunPhase4SandboxOptions = {
+export type RunOauthTwoStepSandboxOptions = {
   authorizeLoader: SandboxLoader;
   callbackLoader: SandboxLoader;
   state: SandboxState;
   authorizeRequest: LoaderRequestInput;
   callbackUrlBase: string;
   callbackCode?: string;
-  callbackStateStrategy?: Phase4CallbackStateStrategy;
+  callbackStateStrategy?: OauthCallbackStateStrategy;
   fixedCallbackState?: string;
   authorizeParams?: Record<string, string>;
   callbackParams?: Record<string, string>;
@@ -38,14 +38,14 @@ export type RunPhase4SandboxOptions = {
   callbackFetchStubs?: SandboxFetchStub[];
 };
 
-export type RunPhase4SandboxResult = {
+export type RunOauthTwoStepSandboxResult = {
   nextState: SandboxState;
-  steps: Phase4StepResult[];
+  steps: OauthTwoStepResult[];
   callbackRequest: LoaderRequestInput;
 };
 
 /**
- * Phase 4 の authorize -> callback 2 ステップ探索を実行する。
+ * OAuth authorize -> callback の 2 ステップ探索を実行する。
  *
  * 入力例:
  * - {
@@ -57,11 +57,11 @@ export type RunPhase4SandboxResult = {
  * - steps: [{ type: "authorize", ... }, { type: "callback", ... }]
  * - callbackRequest.url: "https://app.test/auth/github/callback?code=sandbox-code&state=state-1"
  */
-export const runPhase4Sandbox = async (
-  options: RunPhase4SandboxOptions,
-): Promise<RunPhase4SandboxResult> => {
+export const runOauthTwoStepSandbox = async (
+  options: RunOauthTwoStepSandboxOptions,
+): Promise<RunOauthTwoStepSandboxResult> => {
   let workingState = cloneState(options.state);
-  const authorizeResult = await runLoaderInPhase1Sandbox({
+  const authorizeResult = await runLoaderInSandbox({
     loader: options.authorizeLoader,
     state: workingState,
     request: options.authorizeRequest,
@@ -80,7 +80,7 @@ export const runPhase4Sandbox = async (
     authorizeState,
   });
 
-  const callbackResult = await runLoaderInPhase1Sandbox({
+  const callbackResult = await runLoaderInSandbox({
     loader: options.callbackLoader,
     state: workingState,
     request: callbackRequest,
@@ -95,8 +95,8 @@ export const runPhase4Sandbox = async (
   return {
     nextState: workingState,
     steps: [
-      toPhase4StepResult("authorize", options.authorizeRequest.url, authorizeResult),
-      toPhase4StepResult(
+      toOauthStepResult("authorize", options.authorizeRequest.url, authorizeResult),
+      toOauthStepResult(
         "callback",
         callbackRequest.url,
         callbackResult,
@@ -108,13 +108,13 @@ export const runPhase4Sandbox = async (
   };
 };
 
-const toPhase4StepResult = (
+const toOauthStepResult = (
   type: "authorize" | "callback",
   requestUrl: string,
   result: RunLoaderInSandboxResult,
   location = result.response.headers.get("Location"),
   state = readStateFromLocation(location),
-): Phase4StepResult => {
+): OauthTwoStepResult => {
   return {
     type,
     response: result.response.clone(),
@@ -127,7 +127,7 @@ const toPhase4StepResult = (
 const buildCallbackRequest = (input: {
   callbackUrlBase: string;
   callbackCode?: string;
-  callbackStateStrategy: Phase4CallbackStateStrategy;
+  callbackStateStrategy: OauthCallbackStateStrategy;
   fixedCallbackState?: string;
   authorizeState: string | null;
 }): LoaderRequestInput => {
@@ -150,12 +150,13 @@ const buildCallbackRequest = (input: {
 };
 
 const resolveCallbackState = (input: {
-  callbackStateStrategy: Phase4CallbackStateStrategy;
+  callbackStateStrategy: OauthCallbackStateStrategy;
   fixedCallbackState?: string;
   authorizeState: string | null;
 }): string | null => {
   // authorize 由来 state を使うのが 2 ステップ探索の基準挙動。
   if (input.callbackStateStrategy === "match_authorize") {
+    // authorize redirect に state がない場合は比較条件が作れない。
     if (input.authorizeState === null) {
       throw new Error(
         "authorize response does not contain state query, cannot use match_authorize",
@@ -167,6 +168,7 @@ const resolveCallbackState = (input: {
 
   // 改ざんケースでは authorize state と異なる値を callback に注入する。
   if (input.callbackStateStrategy === "tampered") {
+    // 明示指定があれば固定値で改ざん状態を再現する。
     if (input.fixedCallbackState !== undefined) {
       return input.fixedCallbackState;
     }
