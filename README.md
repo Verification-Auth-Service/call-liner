@@ -96,6 +96,10 @@ pnpm --filter call-liner sandbox:run -- \
 
 実行結果は JSON で出力され、`steps` / `callbackRequest` / `cookieJar` / `trace` を確認できます。
 
+`--state-fuzzing` を付けると `missing_state` / `replay_state` / `different_state` / `double_callback` / `callback_before_authorize` / `callback_after_expiry` を自動生成します。`--spec-validate` を併用すると仕様違反を `vulnerability` として `fuzzing.vulnerabilities` に出力します。
+
+`--graph-explore` を付けると action 順序の順列探索を実行します。`--refresh-loader-file` と `--refresh-url` を指定した場合は `authorize/callback/refresh` の全順序を探索し、`graphExploration.paths` へ結果を出力します。
+
 ## 設計ドキュメント
 
 - [Timeline Sandbox 実装方針（ドラフト）](docs/timeline-sandbox-implementation-plan.md)

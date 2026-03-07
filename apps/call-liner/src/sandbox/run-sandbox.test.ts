@@ -195,6 +195,172 @@ export async function loader(_args: LoaderFunctionArgs) {
     }
   });
 
+  it("runs state fuzzing and emits spec vulnerabilities when callback accepts invalid state", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-fuzz-cli-"));
+
+    try {
+      const authorizeFilePath = path.join(tempRoot, "authorize.tsx");
+      const callbackFilePath = path.join(tempRoot, "callback.tsx");
+      await writeFile(
+        authorizeFilePath,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { commitSession, getSession } from "~/services/session.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request);
+  session.set("oauth:state", "state-1");
+  const setCookie = await commitSession(session, { maxAge: 60 });
+  return redirect("https://github.com/login/oauth/authorize?state=state-1", {
+    headers: { "Set-Cookie": setCookie },
+  });
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        callbackFilePath,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return new Response("ok", { status: 200 });
+}
+`,
+        "utf8",
+      );
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--scenario",
+        "oauth-two-step",
+        "--authorize-loader-file",
+        authorizeFilePath,
+        "--callback-loader-file",
+        callbackFilePath,
+        "--authorize-url",
+        "https://app.test/auth/github",
+        "--callback-url-base",
+        "https://app.test/auth/github/callback",
+        "--state-fuzzing",
+        "--spec-validate",
+      ]);
+
+      const output = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+        fuzzing?: {
+          attacks: Array<{ id: string }>;
+          vulnerabilities: Array<{ ruleId: string }>;
+        };
+      };
+
+      expect(output.fuzzing?.attacks.map((attack) => attack.id)).toEqual([
+        "missing_state",
+        "replay_state",
+        "different_state",
+        "double_callback",
+        "callback_before_authorize",
+        "callback_after_expiry",
+      ]);
+      expect(output.fuzzing?.vulnerabilities.length).toBeGreaterThan(0);
+      expect(
+        output.fuzzing?.vulnerabilities.some(
+          (violation) => violation.ruleId === "state_mismatch_must_reject",
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("runs graph exploration with authorize/callback/refresh permutations", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-graph-cli-"));
+
+    try {
+      const authorizeFilePath = path.join(tempRoot, "authorize.tsx");
+      const callbackFilePath = path.join(tempRoot, "callback.tsx");
+      const refreshFilePath = path.join(tempRoot, "refresh.tsx");
+      await writeFile(
+        authorizeFilePath,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return redirect("https://github.com/login/oauth/authorize?state=state-1");
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        callbackFilePath,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return new Response("ok", { status: 200 });
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        refreshFilePath,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return new Response("refresh-ok", { status: 200 });
+}
+`,
+        "utf8",
+      );
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--scenario",
+        "oauth-two-step",
+        "--authorize-loader-file",
+        authorizeFilePath,
+        "--callback-loader-file",
+        callbackFilePath,
+        "--refresh-loader-file",
+        refreshFilePath,
+        "--authorize-url",
+        "https://app.test/auth/github",
+        "--callback-url-base",
+        "https://app.test/auth/github/callback",
+        "--refresh-url",
+        "https://app.test/auth/github/refresh",
+        "--graph-explore",
+        "--spec-validate",
+      ]);
+
+      const output = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+        graphExploration?: {
+          paths: Array<{ order: string[] }>;
+          vulnerabilities: Array<{ ruleId: string }>;
+        };
+      };
+
+      expect(output.graphExploration?.paths).toHaveLength(6);
+      expect(
+        output.graphExploration?.paths.some(
+          (pathResult) =>
+            pathResult.order.join("->") === "authorize->callback->refresh",
+        ),
+      ).toBe(true);
+      expect(
+        output.graphExploration?.paths.some(
+          (pathResult) =>
+            pathResult.order.join("->") === "callback->authorize->refresh",
+        ),
+      ).toBe(true);
+      expect(output.graphExploration?.vulnerabilities.length).toBeGreaterThan(0);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("throws when --advance-ms is not integer", async () => {
     await expect(
       runSandboxCli([

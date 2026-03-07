@@ -94,6 +94,12 @@
 - `--callback-code <code>`（既定 `sandbox-code`）
 - `--state-mode <match_authorize|tampered|missing|fixed>`（既定 `match_authorize`）
 - `--callback-state <state>`（`fixed` では実質必須）
+- `--state-fuzzing`（OAuth 攻撃ケースを自動生成）
+- `--graph-explore`（action 順序の順列探索）
+- `--spec-validate`（仕様違反を vulnerability として検出）
+- `--refresh-loader-file <path>`（graph exploration 用の refresh loader）
+- `--refresh-url <request-url>`（`--refresh-loader-file` 指定時必須）
+- `--state-expiry-ms <int>`（`callback_after_expiry` の経過時間、既定 `610000`）
 - `--session key=value`
 - `--env key=value`
 - `--database-strategy <none|memory-client>`
@@ -105,6 +111,26 @@
 
 - oauth-two-step では `--advance-ms` / `--replay` は使用不可。
 - oauth-two-step では single 専用引数（`--loader-file`, `--url`, など）混在不可。
+- `--refresh-loader-file` を使う場合は `--refresh-url` が必須。
+
+### 3.4 `state-fuzzing` / `graph-explore` の挙動
+
+- `--state-fuzzing`:
+  - OAuth callback 攻撃ケースを自動生成して順次実行する。
+  - 生成される attack id:
+    - `missing_state`
+    - `replay_state`
+    - `different_state`
+    - `double_callback`
+    - `callback_before_authorize`
+    - `callback_after_expiry`
+- `--graph-explore`:
+  - action 順序の順列を全探索する。
+  - `--refresh-loader-file` なし: `authorize/callback` の 2 順列
+  - `--refresh-loader-file` あり: `authorize/callback/refresh` の 6 順列
+- `--spec-validate`:
+  - 仕様ルールに反するステータスを `vulnerability` として出力する。
+  - 判定は「reject 必須ケースで `status < 400`」を違反として扱う。
 
 ---
 
@@ -208,6 +234,7 @@ route loader ロード時に以下を注入:
 - `Unknown state mode: ... Expected one of match_authorize, tampered, missing, fixed`
 - `Missing required argument: --loader-file <path>`
 - `Missing required argument: --callback-loader-file <path>`
+- `Missing required argument: --refresh-url <request-url> when --refresh-loader-file is used`
 
 ### 5.6 route loader ロード時の検査
 
@@ -296,6 +323,51 @@ pnpm --filter call-liner sandbox:run -- \
   "callbackRequest": {
     "url": "https://app.test/auth/github/callback?code=sandbox-code&state=state-1",
     "method": "GET"
+  },
+  "cookieJar": {},
+  "trace": []
+}
+```
+
+### 7.3 oauth-two-step + state-fuzzing + spec-validate
+
+```json
+{
+  "steps": [],
+  "callbackRequest": { "url": "https://app.test/auth/github/callback?code=sandbox-code&state=state-1", "method": "GET" },
+  "fuzzing": {
+    "attacks": [
+      { "id": "missing_state", "title": "missing state", "steps": [], "violations": [] },
+      { "id": "different_state", "title": "different state", "steps": [], "violations": [] }
+    ],
+    "vulnerabilities": [
+      {
+        "attackId": "different_state",
+        "ruleId": "state_mismatch_must_reject",
+        "expected": "status >= 400 (reject)",
+        "actualStatus": 200,
+        "stepType": "callback",
+        "vulnerability": true
+      }
+    ]
+  },
+  "cookieJar": {},
+  "trace": []
+}
+```
+
+### 7.4 oauth-two-step + graph-explore
+
+```json
+{
+  "steps": [],
+  "callbackRequest": { "url": "https://app.test/auth/github/callback?code=sandbox-code&state=state-1", "method": "GET" },
+  "graphExploration": {
+    "paths": [
+      { "order": ["authorize", "callback", "refresh"], "steps": [], "violations": [] },
+      { "order": ["callback", "authorize", "refresh"], "steps": [], "violations": [] }
+    ],
+    "vulnerabilities": []
   },
   "cookieJar": {},
   "trace": []
