@@ -1,4 +1,5 @@
 import type { AttackDslFinding, ScenarioTimelineViewModel } from "../domain-types";
+import { appStyles, getOperationBadgeStyle } from "../react-styles";
 
 type ScenarioInspectorProps = {
   reportSummary: {
@@ -32,83 +33,93 @@ export function ScenarioInspector(props: ScenarioInspectorProps) {
   const { reportSummary, viewModel } = props;
 
   return (
-    <aside className="panel panel-inspector" aria-label="inspector">
-      <h2>Inspector</h2>
-      <div className="report-summary">
+    <aside
+      className="panel panel-inspector"
+      style={{ ...appStyles.panel, ...appStyles.inspectorPanel }}
+      aria-label="inspector"
+    >
+      <h2 style={appStyles.panelHeading}>Inspector</h2>
+      <div className="report-summary" style={appStyles.reportSummary}>
         <span>Generated: {reportSummary.generated}</span>
         <span>Inconclusive: {reportSummary.inconclusive}</span>
         <span>Missing/Suspect: {reportSummary.missingOrSuspect}</span>
       </div>
 
-      <section className="inspector-section">
-        <h3>Scenario</h3>
-        <p className="scenario-title">{viewModel.inspector.title}</p>
-        <p>{viewModel.inspector.description}</p>
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Scenario</h3>
+        <p className="scenario-title" style={{ ...appStyles.inspectorBlock, ...appStyles.scenarioTitle }}>
+          {viewModel.inspector.title}
+        </p>
+        <p style={appStyles.inspectorBlock}>{viewModel.inspector.description}</p>
       </section>
 
-      <section className="inspector-section">
-        <h3>Operations</h3>
-        <ul className="operation-list">
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Operations</h3>
+        <ul className="operation-list" style={appStyles.operationList}>
           {viewModel.inspector.operations.map((operation, index) => {
             return (
-              <li key={`${operation.type}-${index}`}>
-                <b className={`operation-badge badge-${operation.type}`}>{operation.type}</b>
+              <li key={`${operation.type}-${index}`} style={appStyles.listCard}>
+                <b className={`operation-badge badge-${operation.type}`} style={getOperationBadgeStyle(operation.type)}>
+                  {operation.type}
+                </b>
                 <span>{operation.detail}</span>
-                <small>{operation.note}</small>
+                <small style={appStyles.helpSmall}>{operation.note}</small>
               </li>
             );
           })}
         </ul>
       </section>
 
-      <section className="inspector-section">
-        <h3>Expected Policies</h3>
-        <div className="policy-tags">
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Expected Policies</h3>
+        <div className="policy-tags" style={appStyles.policyTags}>
           {viewModel.inspector.expectedPolicies.map((policyId) => (
-            <span key={policyId}>{policyId}</span>
+            <span key={policyId} style={appStyles.policyTag}>
+              {policyId}
+            </span>
           ))}
         </div>
       </section>
 
-      <section className="inspector-section">
-        <h3>Authorize + Callback Flow</h3>
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Authorize + Callback Flow</h3>
         {viewModel.inspector.flowSummary ? (
-          <p>{viewModel.inspector.flowSummary}</p>
+          <p style={appStyles.inspectorBlock}>{viewModel.inspector.flowSummary}</p>
         ) : (
-          <p>対応する authorize + callback flow は未検出</p>
+          <p style={appStyles.inspectorBlock}>対応する authorize + callback flow は未検出</p>
         )}
       </section>
 
-      <section className="inspector-section">
-        <h3>Inconclusive</h3>
-        <ul className="finding-list">
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Inconclusive</h3>
+        <ul className="finding-list" style={appStyles.findingList}>
           {viewModel.inspector.inconclusive.length > 0 ? (
             viewModel.inspector.inconclusive.map((finding) => (
-              <li key={finding.id}>
+              <li key={finding.id} style={appStyles.listCard}>
                 <b>{finding.title}</b>
                 <span>{finding.detail}</span>
-                <small>Next: {toRecommendedActionLabel(finding)}</small>
+                <small style={appStyles.helpSmall}>Next: {toRecommendedActionLabel(finding)}</small>
               </li>
             ))
           ) : (
-            <li>該当なし</li>
+            <li style={appStyles.listCard}>該当なし</li>
           )}
         </ul>
       </section>
 
-      <section className="inspector-section">
-        <h3>Missing / Suspect</h3>
-        <ul className="finding-list">
+      <section className="inspector-section" style={appStyles.inspectorSection}>
+        <h3 style={appStyles.panelHeading}>Missing / Suspect</h3>
+        <ul className="finding-list" style={appStyles.findingList}>
           {viewModel.inspector.missingOrSuspect.length > 0 ? (
             viewModel.inspector.missingOrSuspect.map((finding) => (
-              <li key={finding.id}>
+              <li key={finding.id} style={appStyles.listCard}>
                 <b>{finding.title}</b>
                 <span>{finding.detail}</span>
-                <small>Next: {toRecommendedActionLabel(finding)}</small>
+                <small style={appStyles.helpSmall}>Next: {toRecommendedActionLabel(finding)}</small>
               </li>
             ))
           ) : (
-            <li>該当なし</li>
+            <li style={appStyles.listCard}>該当なし</li>
           )}
         </ul>
       </section>

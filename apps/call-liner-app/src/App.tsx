@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import type {
   ActionSpaceReport,
   AttackDslReport,
@@ -15,7 +15,7 @@ import {
 import { sampleActionSpaceReport, sampleAttackDslReport } from "./sample-reports";
 import { ScenarioInspector } from "./components/ScenarioInspector";
 import { TimelineShell } from "./components/TimelineShell";
-import "./styles.css";
+import { appStyles, getScenarioButtonStyle } from "./react-styles";
 
 async function readTextFile(file: File): Promise<string> {
   return file.text();
@@ -134,31 +134,58 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    const originalMargin = document.body.style.margin;
+    const originalColor = document.body.style.color;
+    const originalBackground = document.body.style.background;
+    const originalFontFamily = document.body.style.fontFamily;
+
+    document.body.style.margin = "0";
+    document.body.style.color = "#d6dbe3";
+    document.body.style.background = "radial-gradient(circle at top right, #313843, #23262b 45%)";
+    document.body.style.fontFamily = '"Segoe UI", "Noto Sans JP", sans-serif';
+
+    return () => {
+      document.body.style.margin = originalMargin;
+      document.body.style.color = originalColor;
+      document.body.style.background = originalBackground;
+      document.body.style.fontFamily = originalFontFamily;
+    };
+  }, []);
+
   return (
-    <main className="app-root">
-      <header className="app-header">
+    <main className="app-root" style={appStyles.root}>
+      <header className="app-header" style={appStyles.header}>
         <div>
-          <h1>Call Liner Timeline Lab</h1>
-          <p>実験機能を統合し、Operation を時間軸で検証する GUI</p>
+          <h1 style={appStyles.headerTitle}>Call Liner Timeline Lab</h1>
+          <p style={appStyles.headerDescription}>実験機能を統合し、Operation を時間軸で検証する GUI</p>
         </div>
-        <div className="file-controls">
-          <label>
+        <div className="file-controls" style={appStyles.fileControls}>
+          <label style={appStyles.fileLabel}>
             attack-dsl.json
             <input type="file" accept="application/json" onChange={onLoadAttackDsl} />
           </label>
-          <label>
+          <label style={appStyles.fileLabel}>
             action-space.json
             <input type="file" accept="application/json" onChange={onLoadActionSpace} />
           </label>
         </div>
       </header>
 
-      {parseError ? <p className="error-banner">{parseError}</p> : null}
+      {parseError ? (
+        <p className="error-banner" style={appStyles.errorBanner}>
+          {parseError}
+        </p>
+      ) : null}
 
-      <section className="workspace-grid">
-        <aside className="panel panel-scenarios" aria-label="scenario-list">
-          <h2>Scenarios</h2>
-          <ul>
+      <section className="workspace-grid" style={appStyles.workspaceGrid}>
+        <aside
+          className="panel panel-scenarios"
+          style={{ ...appStyles.panel, ...appStyles.scenariosPanel }}
+          aria-label="scenario-list"
+        >
+          <h2 style={appStyles.panelHeading}>Scenarios</h2>
+          <ul style={appStyles.scenariosList}>
             {attackDslReport.scenarios.map((scenario) => {
               const isActive = selectedScenarioId === scenario.id;
 
@@ -167,10 +194,11 @@ export default function App() {
                   <button
                     type="button"
                     className={isActive ? "active" : ""}
+                    style={getScenarioButtonStyle(isActive)}
                     onClick={() => setSelectedScenarioId(scenario.id)}
                   >
-                    <span>{scenario.title}</span>
-                    <small>{scenario.routePath}</small>
+                    <span style={{ display: "block" }}>{scenario.title}</span>
+                    <small style={appStyles.scenarioSmall}>{scenario.routePath}</small>
                   </button>
                 </li>
               );

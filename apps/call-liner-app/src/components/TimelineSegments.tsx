@@ -4,6 +4,7 @@ import type {
   TimelineMarkerViewModel,
   TimelineSegmentViewModel,
 } from "../domain-types";
+import { getMarkerStyle, getSegmentStyle, timelineStyles } from "../react-styles";
 
 type TimelineSegmentsProps = {
   segments: TimelineSegmentViewModel[];
@@ -14,7 +15,7 @@ type TimelineSegmentsProps = {
 };
 
 const MIN_SEGMENT_WIDTH = 10;
-const SEGMENT_HEIGHT = 22;
+const SEGMENT_HEIGHT = 34;
 
 /**
  * 同一座標系でセグメントとマーカーを描画する。
@@ -27,7 +28,7 @@ export function TimelineSegments(props: TimelineSegmentsProps) {
   );
 
   return (
-    <div className="timelineSegmentsLayer">
+    <div className="timelineSegmentsLayer" style={timelineStyles.segmentsLayer}>
       {props.segments.map((segment) => {
         const laneIndex = laneIndexMap.get(segment.laneKey) ?? 0;
         const left = props.timeToPx(segment.startMs);
@@ -41,10 +42,12 @@ export function TimelineSegments(props: TimelineSegmentsProps) {
           <div
             key={segment.id}
             className={`timelineSegment tone-${segment.tone} kind-${segment.kind}`}
-            style={{ left, top, width }}
+            style={getSegmentStyle(segment.tone, left, top, width, segment.kind === "event")}
             title={segment.label}
           >
-            <span className="timelineSegmentLabel">{segment.label}</span>
+            <span className="timelineSegmentLabel" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+              {segment.label}
+            </span>
           </div>
         );
       })}
@@ -56,9 +59,24 @@ export function TimelineSegments(props: TimelineSegmentsProps) {
           <span
             key={marker.id}
             className="timelineMarker"
-            style={{ left: props.timeToPx(marker.atMs), top: laneIndex * props.laneHeight }}
+            style={getMarkerStyle(props.timeToPx(marker.atMs), laneIndex * props.laneHeight)}
           >
-            {marker.label ? <small>{marker.label}</small> : null}
+            {marker.label ? (
+              <small
+                style={{
+                  position: "absolute",
+                  top: "-20px",
+                  left: "7px",
+                  transform: "none",
+                  whiteSpace: "nowrap",
+                  fontSize: "11px",
+                  color: "#d4dfed",
+                  textShadow: "0 1px 0 rgba(0, 0, 0, 0.45)",
+                }}
+              >
+                {marker.label}
+              </small>
+            ) : null}
           </span>
         );
       })}

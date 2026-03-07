@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { timelineStyles } from "../react-styles";
 
 type TimelineHeaderProps = {
   minTime: number;
@@ -21,15 +22,15 @@ export const TimelineHeader = forwardRef<HTMLDivElement, TimelineHeaderProps>(
     }
 
     return (
-      <div className="timelineHeaderRow">
-        <div className="timelineHeaderCorner">Layers</div>
-        <div className="timelineHeaderScrollViewport" ref={ref}>
-          <div className="timelineHeaderContent" style={{ width: props.totalWidth }}>
+      <div className="timelineHeaderRow" style={timelineStyles.headerRow}>
+        <div className="timelineHeaderCorner" style={timelineStyles.headerCorner}>Layers</div>
+        <div className="timelineHeaderScrollViewport" style={timelineStyles.headerViewport} ref={ref}>
+          <div className="timelineHeaderContent" style={{ ...timelineStyles.headerContent, width: props.totalWidth }}>
             {ticks.map((time) => (
               <div
                 key={time}
                 className="timelineHeaderTick"
-                style={{ left: (time - props.minTime) * props.pixelsPerUnit }}
+                style={{ ...timelineStyles.headerTick, left: (time - props.minTime) * props.pixelsPerUnit }}
               >
                 {time}
               </div>

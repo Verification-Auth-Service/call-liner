@@ -1,4 +1,9 @@
 import type { TimelineLaneViewModel } from "../domain-types";
+import {
+  getGridLaneRowStyle,
+  getGridLineStyle,
+  timelineStyles,
+} from "../react-styles";
 
 type TimelineGridProps = {
   lanes: TimelineLaneViewModel[];
@@ -14,30 +19,30 @@ type TimelineGridProps = {
  * 出力例: レーン背景と縦グリッド線を重ねたレイヤー。
  */
 export function TimelineGrid(props: TimelineGridProps) {
-  const lines: Array<{ time: number; className: string }> = [];
+  const lines: Array<{ time: number; isMajor: boolean }> = [];
 
   for (let time = props.minTime; time <= props.maxTime; time += 100) {
     lines.push({
       time,
-      className: time % 500 === 0 ? "timelineGridMajorLine" : "timelineGridMinorLine",
+      isMajor: time % 500 === 0,
     });
   }
 
   return (
-    <div className="timelineGridLayer">
+    <div className="timelineGridLayer" style={timelineStyles.gridLayer}>
       {props.lanes.map((lane, index) => (
         <div
           key={lane.key}
           className="timelineGridLaneRow"
-          style={{ top: index * props.laneHeight, height: props.laneHeight }}
+          style={getGridLaneRowStyle(index * props.laneHeight, props.laneHeight, index)}
         />
       ))}
 
       {lines.map((line) => (
         <div
           key={line.time}
-          className={line.className}
-          style={{ left: props.timeToPx(line.time) }}
+          className={line.isMajor ? "timelineGridMajorLine" : "timelineGridMinorLine"}
+          style={getGridLineStyle(line.isMajor, props.timeToPx(line.time))}
         />
       ))}
     </div>

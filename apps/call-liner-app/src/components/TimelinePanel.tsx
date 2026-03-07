@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import type { ScenarioTimelineViewModel } from "../domain-types";
+import { timelineStyles } from "../react-styles";
 import { createTimelineScale } from "./timeline-scale";
 import { TimelineHeader } from "./TimelineHeader";
 import { TimelineLaneLabels } from "./TimelineLaneLabels";
@@ -61,7 +62,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
   }, [scrollLeft]);
 
   return (
-    <div className="timelinePanel" aria-label="timeline-board">
+    <div className="timelinePanel" style={timelineStyles.panel} aria-label="timeline-board">
       <TimelineHeader
         ref={headerViewportRef}
         minTime={props.vm.minTime}
@@ -70,7 +71,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
         totalWidth={totalWidth}
       />
 
-      <div className="timelineBodyRow">
+      <div className="timelineBodyRow" style={timelineStyles.bodyRow}>
         <TimelineLaneLabels lanes={props.vm.lanes} laneHeight={LANE_HEIGHT} />
 
         <TimelineScrollable

@@ -1,4 +1,5 @@
 import type { ScenarioTimelineViewModel } from "../domain-types";
+import { appStyles } from "../react-styles";
 import { TimelinePanel } from "./TimelinePanel";
 
 type TimelineShellProps = {
@@ -12,7 +13,7 @@ type TimelineShellProps = {
  */
 export function TimelineShell(props: TimelineShellProps) {
   return (
-    <section className="panel panel-timeline">
+    <section className="panel panel-timeline" style={{ ...appStyles.panel, ...appStyles.timelinePanelShell }}>
       <TimelinePanel vm={props.viewModel} />
     </section>
   );

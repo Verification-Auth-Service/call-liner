@@ -1,4 +1,5 @@
 import type { TimelineLaneViewModel } from "../domain-types";
+import { getLaneLabelRowStyle, timelineStyles } from "../react-styles";
 
 type TimelineLaneLabelsProps = {
   lanes: TimelineLaneViewModel[];
@@ -12,9 +13,9 @@ type TimelineLaneLabelsProps = {
  */
 export function TimelineLaneLabels(props: TimelineLaneLabelsProps) {
   return (
-    <div className="timelineLaneLabels">
-      {props.lanes.map((lane) => (
-        <div key={lane.key} className="timelineLaneLabelRow" style={{ height: props.laneHeight }}>
+    <div className="timelineLaneLabels" style={timelineStyles.laneLabels}>
+      {props.lanes.map((lane, index) => (
+        <div key={lane.key} className="timelineLaneLabelRow" style={getLaneLabelRowStyle(index, props.laneHeight)}>
           {lane.label}
         </div>
       ))}

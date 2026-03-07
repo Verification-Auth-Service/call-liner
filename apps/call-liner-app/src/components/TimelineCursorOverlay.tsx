@@ -1,4 +1,9 @@
 import type { PointerEvent } from "react";
+import {
+  getPlayheadLabelStyle,
+  getPlayheadLineStyle,
+  timelineStyles,
+} from "../react-styles";
 
 type TimelineCursorOverlayProps = {
   currentTime: number;
@@ -16,11 +21,22 @@ export function TimelineCursorOverlay(props: TimelineCursorOverlayProps) {
   const x = props.timeToPx(props.currentTime);
 
   return (
-    <div className={`timelinePlayhead ${props.isDragging ? "isDragging" : ""}`} style={{ left: x }}>
-      <div className="timelinePlayheadLabel" onPointerDown={props.onPointerDown}>
+    <div
+      className={`timelinePlayhead ${props.isDragging ? "isDragging" : ""}`}
+      style={{ ...timelineStyles.playhead, left: x }}
+    >
+      <div
+        className="timelinePlayheadLabel"
+        style={getPlayheadLabelStyle(props.isDragging)}
+        onPointerDown={props.onPointerDown}
+      >
         {Math.round(props.currentTime)}
       </div>
-      <div className="timelinePlayheadLine" onPointerDown={props.onPointerDown} />
+      <div
+        className="timelinePlayheadLine"
+        style={getPlayheadLineStyle(props.isDragging)}
+        onPointerDown={props.onPointerDown}
+      />
     </div>
   );
 }

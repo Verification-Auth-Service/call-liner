@@ -6,6 +6,7 @@ import {
   type PointerEvent,
 } from "react";
 import type { ScenarioTimelineViewModel } from "../domain-types";
+import { timelineStyles } from "../react-styles";
 import { TimelineCursorOverlay } from "./TimelineCursorOverlay";
 import { TimelineGrid } from "./TimelineGrid";
 import { TimelineSegments } from "./TimelineSegments";
@@ -106,14 +107,20 @@ export const TimelineScrollable = forwardRef<HTMLDivElement, TimelineScrollableP
     );
 
     return (
-      <div className="timelineScrollViewport" ref={setViewportRef} onScroll={props.onScroll}>
+      <div
+        className="timelineScrollViewport"
+        style={timelineStyles.scrollViewport}
+        ref={setViewportRef}
+        onScroll={props.onScroll}
+      >
         <div
           className="timelineScrollContent"
-          ref={contentRef}
           style={{
+            ...timelineStyles.scrollContent,
             width: props.totalWidth,
             height: props.vm.lanes.length * props.laneHeight,
           }}
+          ref={contentRef}
           onPointerDown={onPointerDownBackground}
         >
           <TimelineGrid
