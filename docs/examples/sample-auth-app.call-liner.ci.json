@@ -41,7 +41,14 @@
           "callbackUrlBase": "https://app.test/auth/github-app/callback",
           "stateFuzzing": true,
           "specValidate": true,
+          "stateExpiryMs": 60000000000,
+          "stubRefreshToken": "rotated-refresh-token",
           "failOnVulnerability": true,
+          "database": {
+            "strategy": "memory-client",
+            "global": "prisma",
+            "models": ["user", "oAuthAccount"]
+          },
           "env": {
             "GITHUB_APP_CLIENT_ID": "dummy-client-id",
             "GITHUB_APP_CLIENT_SECRET": "dummy-client-secret",

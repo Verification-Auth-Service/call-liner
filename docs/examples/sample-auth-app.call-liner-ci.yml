@@ -29,12 +29,19 @@ jobs:
         with:
           path: sample-auth-app
 
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.0
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: |
+            sample-auth-app/pnpm-lock.yaml
+            call-liner/pnpm-lock.yaml
 
       - name: Checkout call-liner
         uses: actions/checkout@v4

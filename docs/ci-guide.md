@@ -223,6 +223,7 @@ pnpm --filter call-liner ci -- \
   "callbackUrlBase": "https://app.test/auth/github/callback",
   "stateFuzzing": true,
   "specValidate": true,
+  "stubRefreshToken": "rotated-refresh-token",
   "failOnVulnerability": true,
   "database": {
     "strategy": "memory-client",
@@ -256,6 +257,8 @@ pnpm --filter call-liner ci -- \
 | `database.strategy` | `"none" \| "memory-client"` | 任意 | DB スタブ戦略 |
 | `database.global` | `string` | 任意 | DB グローバル名 |
 | `database.models` | `string[]` | 任意 | DB model 名 |
+| `stubRefreshToken` | `string` | 任意 | GitHub token スタブの `refresh_token` を固定する |
+| `stubGithubReposStatus` | `number` | 任意 | GitHub repos API スタブの status を上書きする |
 | `failOnVulnerability` | `boolean` | 任意 | vulnerability を fail 扱いにするか |
 
 ### 9.3 判定
