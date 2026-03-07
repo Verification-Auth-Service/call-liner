@@ -22,6 +22,7 @@ const TICK_STEP_MS = 100;
 const MAJOR_TICK_STEP_MS = 500;
 const CURSOR_START_MS = 120;
 const SEGMENT_GAP_MS = 130;
+const LOGICAL_TIME_SCALE = 0.0012;
 
 const TIMELINE_LANES: TimelineLaneViewModel[] = [
   {
@@ -126,6 +127,11 @@ function toOperationDetail(operation: AttackDslOperation): string {
     case "replay":
       return `Replay target: ${operation.target}`;
   }
+}
+
+function toTimelineStartMs(operation: AttackDslOperation): number {
+  // DSL の論理時刻 at は保持しつつ、UI では読みやすい幅へ圧縮して配置する。
+  return CURSOR_START_MS + Math.floor(operation.at * LOGICAL_TIME_SCALE);
 }
 
 function buildTimelineTicks(maxMs: number): TimelineTickViewModel[] {
@@ -249,16 +255,17 @@ export function buildScenarioTimelineViewModel(params: {
 
   const segments: ScenarioTimelineViewModel["segments"] = [];
   const markers: TimelineMarkerViewModel[] = [];
-  let cursorMs = CURSOR_START_MS;
+  let coverageEndMs = CURSOR_START_MS;
 
   for (const operation of scenario.operations) {
     const durationMs = toOperationDurationMs(operation);
     const laneKey = toOperationLaneKey(operation);
+    const startMs = toTimelineStartMs(operation);
 
     segments.push({
-      id: `${scenario.id}-${operation.type}-${segments.length + 1}`,
+      id: `${scenario.id}-${operation.id}`,
       laneKey,
-      startMs: cursorMs,
+      startMs,
       durationMs,
       label: toOperationLabel(operation),
       tone: toOperationTone(operation),
@@ -268,36 +275,43 @@ export function buildScenarioTimelineViewModel(params: {
     // request/replay は操作開始点が重要なので先頭位置にマーカーを置く。
     if (operation.type === "request" || operation.type === "replay") {
       markers.push({
-        id: `${scenario.id}-marker-${markers.length + 1}`,
+        id: `${scenario.id}-marker-${operation.id}`,
         laneKey,
-        atMs: cursorMs,
+        atMs: startMs,
       });
     }
 
     // advance_time は時間経過の終端が重要なので終点にもマーカーを置く。
     if (operation.type === "advance_time") {
       markers.push({
-        id: `${scenario.id}-marker-${markers.length + 1}`,
+        id: `${scenario.id}-marker-${operation.id}-end`,
         laneKey,
-        atMs: cursorMs + durationMs,
+        atMs: startMs + durationMs,
         label: `+${operation.ms}ms`,
       });
     }
 
-    cursorMs += durationMs + SEGMENT_GAP_MS;
+    // operation 単位期待は policy 成立の観測点なので同じ開始位置に短い policy イベントを置く。
+    if (operation.expect.length > 0) {
+      segments.push({
+        id: `${scenario.id}-${operation.id}-policy`,
+        laneKey: "policyCheck",
+        startMs,
+        durationMs: Math.max(180, Math.min(420, durationMs)),
+        label: `expect:${operation.expect.join(",")}`,
+        tone: "policy",
+        kind: "bar",
+      });
+      markers.push({
+        id: `${scenario.id}-marker-${operation.id}-policy`,
+        laneKey: "policyCheck",
+        atMs: startMs,
+        label: operation.expect.join(","),
+      });
+    }
+
+    coverageEndMs = Math.max(coverageEndMs, startMs + durationMs + SEGMENT_GAP_MS);
   }
-
-  const coverageEndMs = Math.max(cursorMs, 520);
-
-  segments.push({
-    id: `${scenario.id}-policy-check`,
-    laneKey: "policyCheck",
-    startMs: 80,
-    durationMs: coverageEndMs - 80,
-    label: `expected:${scenario.expectedPolicyIds.join(",") || "none"}`,
-    tone: "policy",
-    kind: "bar",
-  });
 
   // フローが特定できるシナリオのみ authorize+callback の探索レーンを表示する。
   if (flow) {
@@ -305,19 +319,19 @@ export function buildScenarioTimelineViewModel(params: {
       id: `${scenario.id}-flow-match`,
       laneKey: "flow",
       startMs: 90,
-      durationMs: Math.max(cursorMs, 640) - 90,
+      durationMs: Math.max(coverageEndMs, 640) - 90,
       label: `${flow.authorizePath} -> ${flow.callbackPath}`,
       tone: "flow",
       kind: "bar",
     });
   }
 
-  const maxMs = Math.max(cursorMs + 260, 1700);
+  const maxMs = Math.max(coverageEndMs + 260, 1700);
 
   return {
     minTime: 0,
     maxTime: maxMs,
-    currentTime: Math.min(554, cursorMs),
+    currentTime: Math.min(554, coverageEndMs),
     ticks: buildTimelineTicks(maxMs),
     lanes: TIMELINE_LANES,
     segments,
@@ -326,9 +340,12 @@ export function buildScenarioTimelineViewModel(params: {
       title: scenario.title,
       description: scenario.description,
       operations: scenario.operations.map((operation) => ({
+        id: operation.id,
         type: operation.type,
+        at: operation.at,
         detail: toOperationDetail(operation),
         note: operation.note,
+        expect: operation.expect,
       })),
       expectedPolicies: scenario.expectedPolicyIds,
       flowSummary: flow ? `${flow.authorizePath} -> ${flow.callbackPath}` : undefined,
@@ -401,6 +418,7 @@ export function parseAttackDslReportText(text: string): AttackDslReport {
 
   return {
     version: 1,
+    dslVersion: data.dslVersion === 2 ? 2 : undefined,
     generatedAt: typeof data.generatedAt === "string" ? data.generatedAt : "",
     summary:
       data.summary &&

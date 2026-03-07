@@ -21,8 +21,13 @@ export type AttackDslFetchStub = {
 
 export type AttackDslOperation =
   | {
-      type: "request";
       id: string;
+      at: number;
+      expect: string[];
+      derivedFrom: {
+        entrypointId: string;
+      };
+      type: "request";
       request: {
         url: string;
         method: "GET" | "POST";
@@ -32,11 +37,23 @@ export type AttackDslOperation =
       note: string;
     }
   | {
+      id: string;
+      at: number;
+      expect: string[];
+      derivedFrom: {
+        entrypointId: string;
+      };
       type: "advance_time";
       ms: number;
       note: string;
     }
   | {
+      id: string;
+      at: number;
+      expect: string[];
+      derivedFrom: {
+        entrypointId: string;
+      };
       type: "replay";
       target: string;
       note: string;
@@ -72,6 +89,7 @@ export type AttackDslFinding = {
 
 export type AttackDslReport = {
   version: 1;
+  dslVersion?: 2;
   generatedAt: string;
   summary?: {
     callbackEntrypoints: number;
@@ -168,9 +186,12 @@ export type TimelineTickViewModel = {
 };
 
 export type InspectorOperationItem = {
+  id: string;
   type: AttackDslOperation["type"];
+  at: number;
   detail: string;
   note: string;
+  expect: string[];
 };
 
 export type ScenarioInspectorViewModel = {

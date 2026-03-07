@@ -63,7 +63,15 @@ export function ScenarioInspector(props: ScenarioInspectorProps) {
                   {operation.type}
                 </b>
                 <span>{operation.detail}</span>
+                <small style={appStyles.helpSmall}>
+                  op=`{operation.id}` at={operation.at}ms
+                </small>
                 <small style={appStyles.helpSmall}>{operation.note}</small>
+                {operation.expect.length > 0 ? (
+                  <small style={appStyles.helpSmall}>
+                    expect: {operation.expect.join(", ")}
+                  </small>
+                ) : null}
               </li>
             );
           })}
