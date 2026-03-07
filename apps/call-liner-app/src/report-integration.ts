@@ -4,15 +4,52 @@ import type {
   AttackDslOperation,
   AttackDslReport,
   AttackDslScenario,
-  TimelineFlow,
+  ScenarioTimelineViewModel,
   TimelineBoard,
   TimelineClip,
+  TimelineFlow,
+  TimelineLaneKey,
+  TimelineLaneViewModel,
   TimelineMarker,
+  TimelineMarkerViewModel,
+  TimelineSegmentTone,
+  TimelineTickViewModel,
 } from "./domain-types";
 
 const REQUEST_DURATION_MS = 380;
 const REPLAY_DURATION_MS = 320;
-const FLOW_LANE_ID = "lane-flow";
+const TICK_STEP_MS = 100;
+const MAJOR_TICK_STEP_MS = 500;
+const CURSOR_START_MS = 120;
+const SEGMENT_GAP_MS = 130;
+
+const TIMELINE_LANES: TimelineLaneViewModel[] = [
+  {
+    key: "request",
+    label: "Request",
+    description: "初回リクエスト",
+  },
+  {
+    key: "advanceTime",
+    label: "Advance Time",
+    description: "時間経過イベント",
+  },
+  {
+    key: "replay",
+    label: "Replay",
+    description: "再送リクエスト",
+  },
+  {
+    key: "policyCheck",
+    label: "Policy Check",
+    description: "期待ポリシー",
+  },
+  {
+    key: "flow",
+    label: "Authorize + Callback Flow",
+    description: "entrypoint 遷移",
+  },
+];
 
 function hasKind(entrypoint: ActionSpaceEntrypoint, kind: string): boolean {
   return entrypoint.endpointKinds.includes(kind);
@@ -30,51 +67,41 @@ function toOperationDurationMs(operation: AttackDslOperation): number {
 
   // advance_time は絶対時間が長すぎるため、表示可能な幅に圧縮する。
   if (operation.type === "advance_time") {
-    return Math.max(220, Math.min(900, Math.floor(operation.ms / 1000)));
+    return Math.max(220, Math.min(980, Math.floor(operation.ms / 1000)));
   }
 
   // replay は request より短いイベントとして表示する。
   return REPLAY_DURATION_MS;
 }
 
-function toOperationCategory(operation: AttackDslOperation): "operation" {
-  // operation 種別にかかわらず統合機能では同一カテゴリとして扱う。
-  switch (operation.type) {
-    case "request":
-    case "advance_time":
-    case "replay":
-      return "operation";
-  }
-}
-
-function toOperationLaneId(operation: AttackDslOperation): string {
+function toOperationLaneKey(operation: AttackDslOperation): TimelineLaneKey {
   // request は Request レーンへ集約する。
   if (operation.type === "request") {
-    return "lane-request";
+    return "request";
   }
 
   // advance_time は時間制御専用レーンで分離して視認性を上げる。
   if (operation.type === "advance_time") {
-    return "lane-advance";
+    return "advanceTime";
   }
 
   // replay は再送操作なので replay レーンへ配置する。
-  return "lane-replay";
+  return "replay";
 }
 
-function toOperationTone(operation: AttackDslOperation): "red" | "green" | "amber" {
-  // advance_time は状態変化の中立操作として amber を使う。
+function toOperationTone(operation: AttackDslOperation): TimelineSegmentTone {
+  // advance_time は時間経過を示す専用色を使う。
   if (operation.type === "advance_time") {
-    return "amber";
+    return "advanceTime";
   }
 
-  // replay シナリオは異常検証が主目的なので red を使う。
+  // replay は再送操作なので危険側の色を使う。
   if (operation.type === "replay") {
-    return "red";
+    return "replay";
   }
 
-  // 初回 request は基準操作として green を使う。
-  return "green";
+  // request は基準操作として成功系カラーを使う。
+  return "request";
 }
 
 function toOperationLabel(operation: AttackDslOperation): string {
@@ -83,10 +110,65 @@ function toOperationLabel(operation: AttackDslOperation): string {
     case "request":
       return `request:${operation.id}`;
     case "advance_time":
-      return `advance:${operation.ms}ms`;
+      return `advance +${operation.ms}ms`;
     case "replay":
       return `replay:${operation.target}`;
   }
+}
+
+function toOperationDetail(operation: AttackDslOperation): string {
+  // 種別ごとに有効なプロパティが異なるため表示文言を分ける。
+  switch (operation.type) {
+    case "request":
+      return `${operation.request.method} ${operation.request.url}`;
+    case "advance_time":
+      return `Advance ${operation.ms}ms`;
+    case "replay":
+      return `Replay target: ${operation.target}`;
+  }
+}
+
+function buildTimelineTicks(maxMs: number): TimelineTickViewModel[] {
+  const ticks: TimelineTickViewModel[] = [];
+
+  for (let timeMs = TICK_STEP_MS; timeMs <= maxMs; timeMs += TICK_STEP_MS) {
+    ticks.push({
+      timeMs,
+      isMajor: timeMs % MAJOR_TICK_STEP_MS === 0,
+    });
+  }
+
+  return ticks;
+}
+
+function toClipTone(tone: TimelineSegmentTone): "red" | "green" | "amber" {
+  // request/flow は基準線として緑系に寄せる。
+  if (tone === "request" || tone === "flow") {
+    return "green";
+  }
+
+  // advance_time は中立イベントとして amber を使う。
+  if (tone === "advanceTime") {
+    return "amber";
+  }
+
+  // replay/policy は警告系として red を使う。
+  return "red";
+}
+
+function toClipCategory(laneKey: TimelineLaneKey): "operation" | "policy" | "flow" {
+  // policy レーンは policy カテゴリへ固定する。
+  if (laneKey === "policyCheck") {
+    return "policy";
+  }
+
+  // flow レーンは flow カテゴリへ固定する。
+  if (laneKey === "flow") {
+    return "flow";
+  }
+
+  // それ以外は操作カテゴリとして扱う。
+  return "operation";
 }
 
 /**
@@ -151,77 +233,154 @@ export function findScenarioById(
 }
 
 /**
- * 統合レポート情報から、時間軸 UI 向けのボード構造を生成する。
+ * シナリオ JSON をタイムライン描画向け ViewModel に正規化する。
+ * 入力例: `buildScenarioTimelineViewModel({ scenario, flow, inconclusive: [], missingOrSuspect: [] })`
+ * 出力例: `{ lanes: [...], segments: [...], inspector: { operations: [...] } }`
+ */
+export function buildScenarioTimelineViewModel(params: {
+  scenario: AttackDslScenario;
+  flow?: TimelineFlow;
+  inconclusive: AttackDslReport["inconclusive"];
+  missingOrSuspect: AttackDslReport["missingOrSuspect"];
+}): ScenarioTimelineViewModel {
+  const { scenario, flow } = params;
+  const inconclusive = params.inconclusive ?? [];
+  const missingOrSuspect = params.missingOrSuspect ?? [];
+
+  const segments: ScenarioTimelineViewModel["segments"] = [];
+  const markers: TimelineMarkerViewModel[] = [];
+  let cursorMs = CURSOR_START_MS;
+
+  for (const operation of scenario.operations) {
+    const durationMs = toOperationDurationMs(operation);
+    const laneKey = toOperationLaneKey(operation);
+
+    segments.push({
+      id: `${scenario.id}-${operation.type}-${segments.length + 1}`,
+      laneKey,
+      startMs: cursorMs,
+      durationMs,
+      label: toOperationLabel(operation),
+      tone: toOperationTone(operation),
+      kind: operation.type === "advance_time" ? "event" : "bar",
+    });
+
+    // request/replay は操作開始点が重要なので先頭位置にマーカーを置く。
+    if (operation.type === "request" || operation.type === "replay") {
+      markers.push({
+        id: `${scenario.id}-marker-${markers.length + 1}`,
+        laneKey,
+        atMs: cursorMs,
+      });
+    }
+
+    // advance_time は時間経過の終端が重要なので終点にもマーカーを置く。
+    if (operation.type === "advance_time") {
+      markers.push({
+        id: `${scenario.id}-marker-${markers.length + 1}`,
+        laneKey,
+        atMs: cursorMs + durationMs,
+        label: `+${operation.ms}ms`,
+      });
+    }
+
+    cursorMs += durationMs + SEGMENT_GAP_MS;
+  }
+
+  const coverageEndMs = Math.max(cursorMs, 520);
+
+  segments.push({
+    id: `${scenario.id}-policy-check`,
+    laneKey: "policyCheck",
+    startMs: 80,
+    durationMs: coverageEndMs - 80,
+    label: `expected:${scenario.expectedPolicyIds.join(",") || "none"}`,
+    tone: "policy",
+    kind: "bar",
+  });
+
+  // フローが特定できるシナリオのみ authorize+callback の探索レーンを表示する。
+  if (flow) {
+    segments.push({
+      id: `${scenario.id}-flow-match`,
+      laneKey: "flow",
+      startMs: 90,
+      durationMs: Math.max(cursorMs, 640) - 90,
+      label: `${flow.authorizePath} -> ${flow.callbackPath}`,
+      tone: "flow",
+      kind: "bar",
+    });
+  }
+
+  const maxMs = Math.max(cursorMs + 260, 1700);
+
+  return {
+    minTime: 0,
+    maxTime: maxMs,
+    currentTime: Math.min(554, cursorMs),
+    ticks: buildTimelineTicks(maxMs),
+    lanes: TIMELINE_LANES,
+    segments,
+    markers,
+    inspector: {
+      title: scenario.title,
+      description: scenario.description,
+      operations: scenario.operations.map((operation) => ({
+        type: operation.type,
+        detail: toOperationDetail(operation),
+        note: operation.note,
+      })),
+      expectedPolicies: scenario.expectedPolicyIds,
+      flowSummary: flow ? `${flow.authorizePath} -> ${flow.callbackPath}` : undefined,
+      inconclusive,
+      missingOrSuspect,
+    },
+  };
+}
+
+/**
+ * 互換性のために旧 TimelineBoard 形式へ変換する。
  * 入力例: `buildTimelineBoard(scenario, flow)`
- * 出力例: `{ maxMs: 1600, lanes: [...], clips: [...], markers: [...] }`
+ * 出力例: `{ maxMs: 1700, lanes: [...], clips: [...], markers: [...] }`
  */
 export function buildTimelineBoard(
   scenario: AttackDslScenario,
   flow?: TimelineFlow,
 ): TimelineBoard {
-  const clips: TimelineClip[] = [];
-  const markers: TimelineMarker[] = [];
-  let cursorMs = 120;
-
-  for (const operation of scenario.operations) {
-    const durationMs = toOperationDurationMs(operation);
-    const laneId = toOperationLaneId(operation);
-
-    clips.push({
-      id: `${scenario.id}-${operation.type}-${clips.length + 1}`,
-      laneId,
-      label: toOperationLabel(operation),
-      startMs: cursorMs,
-      endMs: cursorMs + durationMs,
-      tone: toOperationTone(operation),
-      category: toOperationCategory(operation),
-    });
-
-    // request と replay は境界点が重要なのでマーカーを追加して判読性を高める。
-    if (operation.type === "request" || operation.type === "replay") {
-      markers.push({
-        id: `${scenario.id}-marker-${markers.length + 1}`,
-        laneId,
-        atMs: cursorMs + Math.floor(durationMs / 2),
-      });
-    }
-
-    cursorMs += durationMs + 130;
-  }
-
-  clips.push({
-    id: `${scenario.id}-policy-check`,
-    laneId: "lane-policy",
-    label: `expected:${scenario.expectedPolicyIds.join(",") || "none"}`,
-    startMs: 80,
-    endMs: Math.max(cursorMs, 520),
-    tone: "red",
-    category: "policy",
+  const viewModel = buildScenarioTimelineViewModel({
+    scenario,
+    flow,
+    inconclusive: [],
+    missingOrSuspect: [],
   });
 
-  // フローが特定できるシナリオのみ authorize+callback の探索レーンを表示する。
-  if (flow) {
-    clips.push({
-      id: `${scenario.id}-flow-match`,
-      laneId: FLOW_LANE_ID,
-      label: `${flow.authorizePath} -> ${flow.callbackPath}`,
-      startMs: 90,
-      endMs: Math.max(cursorMs, 640),
-      tone: "green",
-      category: "flow",
-    });
-  }
+  const clips: TimelineClip[] = viewModel.segments.map((segment) => {
+    return {
+      id: segment.id,
+      laneId: `lane-${segment.laneKey}`,
+      label: segment.label,
+      startMs: segment.startMs,
+      endMs: segment.startMs + segment.durationMs,
+      tone: toClipTone(segment.tone),
+      category: toClipCategory(segment.laneKey),
+    };
+  });
+
+  const markers: TimelineMarker[] = viewModel.markers.map((marker) => {
+    return {
+      id: marker.id,
+      laneId: `lane-${marker.laneKey}`,
+      atMs: marker.atMs,
+    };
+  });
 
   return {
-    maxMs: Math.max(cursorMs + 260, 1700),
-    cursorMs: Math.min(554, cursorMs),
-    lanes: [
-      { id: "lane-request", label: "Request" },
-      { id: "lane-advance", label: "Advance Time" },
-      { id: "lane-replay", label: "Replay" },
-      { id: "lane-policy", label: "Policy Check" },
-      { id: FLOW_LANE_ID, label: "Authorize + Callback Flow" },
-    ],
+    maxMs: viewModel.maxTime,
+    cursorMs: viewModel.currentTime,
+    lanes: viewModel.lanes.map((lane) => ({
+      id: `lane-${lane.key}`,
+      label: lane.label,
+    })),
     clips,
     markers,
   };
