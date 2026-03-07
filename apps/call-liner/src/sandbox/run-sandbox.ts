@@ -180,6 +180,17 @@ export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
     if (parsed.scenario === "single") {
       const singleOutput = await runSingleScenario(parsed, sessionRecord);
       console.log(JSON.stringify(singleOutput, null, 2));
+      const sampleCommand = buildMissingOauthParamSampleCommand(
+        parsed,
+        singleOutput.steps,
+        rawArgs,
+      );
+
+      // callback URL の code/state が不足している場合は再現用コマンドを補助表示する。
+      if (sampleCommand) {
+        console.error("不足パラメータを補完したサンプルコマンド:");
+        console.error(sampleCommand);
+      }
       return;
     }
 
@@ -188,6 +199,68 @@ export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
   } finally {
     restoreEnvOverrides(originalEnvValues);
   }
+};
+
+const buildMissingOauthParamSampleCommand = (
+  parsed: ParsedSingleCliArgs,
+  steps: Array<
+    | { type: "request"; id?: string; status: number; location: string | null; body: string }
+    | { type: "advance_time"; fromMs: number; toMs: number }
+    | { type: "replay"; target: string | number; status: number; location: string | null; body: string }
+  >,
+  rawArgs: string[],
+): string | undefined => {
+  const requestUrl = new URL(parsed.url);
+  const hasCode = requestUrl.searchParams.get("code");
+  const hasState = requestUrl.searchParams.get("state");
+
+  // code/state が両方揃っている場合は補完不要。
+  if (hasCode && hasState) {
+    return undefined;
+  }
+
+  const latestHttpStep = [...steps]
+    .reverse()
+    .find((step) => step.type === "request" || step.type === "replay");
+
+  // 失敗レスポンスでない場合は不足パラメータの補完提案を出さない。
+  if (!latestHttpStep || latestHttpStep.status < 400) {
+    return undefined;
+  }
+
+  const errorBody = latestHttpStep.body.toLowerCase();
+  const hintsAtCodeStateValidation =
+    errorBody.includes("code") ||
+    errorBody.includes("state") ||
+    errorBody.includes("不足") ||
+    errorBody.includes("missing");
+
+  // エラー本文が code/state 検証に見えない場合はノイズ回避のため提案しない。
+  if (!hintsAtCodeStateValidation) {
+    return undefined;
+  }
+
+  // 実際に不足している query だけ補完し、既存値は尊重する。
+  if (!hasCode) {
+    requestUrl.searchParams.set("code", "sample-code");
+  }
+  if (!hasState) {
+    requestUrl.searchParams.set("state", "sample-state");
+  }
+
+  const sanitizedArgs = rawArgs.filter((arg) => arg !== "--");
+  const urlIndex = sanitizedArgs.findIndex((arg) => arg === "--url");
+
+  // 元コマンドに --url がなければ補完コマンドを安全に生成できない。
+  if (urlIndex === -1 || urlIndex + 1 >= sanitizedArgs.length) {
+    return undefined;
+  }
+
+  const argsWithPatchedUrl = [...sanitizedArgs];
+  argsWithPatchedUrl[urlIndex + 1] = requestUrl.toString();
+
+  const escapedArgs = argsWithPatchedUrl.map((arg) => JSON.stringify(arg)).join(" ");
+  return `pnpm --filter call-liner sandbox:run -- ${escapedArgs}`;
 };
 
 const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {

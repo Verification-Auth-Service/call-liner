@@ -72,6 +72,60 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   });
 
+  it("prints sample command when callback url is missing code/state", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-cli-hint-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "callback.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) {
+    return new Response("codeまたはstateが不足しています。", { status: 400 });
+  }
+  return new Response("ok", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+        "--stub-refresh-token",
+        "rotated-refresh-token",
+        "--stub-github-repos-status",
+        "401",
+      ]);
+
+      const errorCalls = errorSpy.mock.calls.map((call) => String(call[0] ?? ""));
+      const sampleCommand = errorCalls.find((message) =>
+        message.includes("pnpm --filter call-liner sandbox:run --"),
+      );
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(errorCalls.some((message) => message.includes("不足パラメータを補完したサンプルコマンド"))).toBe(
+        true,
+      );
+      expect(sampleCommand).toContain("--stub-refresh-token");
+      expect(sampleCommand).toContain("rotated-refresh-token");
+      expect(sampleCommand).toContain("--stub-github-repos-status");
+      expect(sampleCommand).toContain("401");
+      expect(sampleCommand).toContain(
+        "https://app.test/githubinfo?code=sample-code&state=sample-state",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs oauth-two-step scenario and prints step results as json", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-oauth-cli-"));
 
