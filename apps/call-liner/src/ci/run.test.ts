@@ -326,4 +326,80 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("downgrades undefined helper references to warning-like pass results", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-ci-warning-"));
+
+    try {
+      const projectRoot = path.join(tempRoot, "apps", "auth-app");
+      const loaderFile = path.join(projectRoot, "app", "routes", "api.resource.tsx");
+      const configPath = path.join(tempRoot, "call-liner.ci.json");
+
+      await mkdir(path.dirname(loaderFile), { recursive: true });
+      await writeFile(
+        loaderFile,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  return getLoggedInUser();
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            version: 1,
+            projects: [
+              {
+                id: "auth-app",
+                root: "apps/auth-app",
+                tasks: [
+                  {
+                    id: "resource-warning",
+                    kind: "single",
+                    loaderFile: "app/routes/api.resource.tsx",
+                    url: "https://app.test/api/resource",
+                  },
+                ],
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+
+      await runCi(["--config", configPath]);
+
+      const summaryRaw = await readFile(
+        path.join(tempRoot, "artifacts", "call-liner", "summary.json"),
+        "utf8",
+      );
+      const summary = JSON.parse(summaryRaw) as {
+        status: string;
+        counts: { pass: number; fail: number; error: number };
+        results: Array<{
+          status: string;
+          summary: string;
+          details?: { warning?: string; warningKind?: string };
+        }>;
+      };
+
+      expect(summary.status).toBe("pass");
+      expect(summary.counts).toEqual({ pass: 1, fail: 0, error: 0 });
+      expect(summary.results[0]?.status).toBe("pass");
+      expect(summary.results[0]?.summary).toBe("warning: getLoggedInUser is not defined");
+      expect(summary.results[0]?.details).toEqual({
+        warning: "getLoggedInUser is not defined",
+        warningKind: "undefined_reference",
+      });
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
