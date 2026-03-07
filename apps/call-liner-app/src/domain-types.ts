@@ -122,3 +122,74 @@ export type TimelineFlow = {
   authorizePath: string;
   callbackPath: string;
 };
+
+export type TimelineLaneKey =
+  | "request"
+  | "advanceTime"
+  | "replay"
+  | "policyCheck"
+  | "flow";
+
+export type TimelineSegmentTone =
+  | "request"
+  | "advanceTime"
+  | "replay"
+  | "policy"
+  | "flow";
+
+export type TimelineSegmentKind = "bar" | "event";
+
+export type TimelineLaneViewModel = {
+  key: TimelineLaneKey;
+  label: string;
+  description: string;
+};
+
+export type TimelineSegmentViewModel = {
+  id: string;
+  laneKey: TimelineLaneKey;
+  startMs: number;
+  durationMs: number;
+  label: string;
+  tone: TimelineSegmentTone;
+  kind: TimelineSegmentKind;
+};
+
+export type TimelineMarkerViewModel = {
+  id: string;
+  laneKey: TimelineLaneKey;
+  atMs: number;
+  label?: string;
+};
+
+export type TimelineTickViewModel = {
+  timeMs: number;
+  isMajor: boolean;
+};
+
+export type InspectorOperationItem = {
+  type: AttackDslOperation["type"];
+  detail: string;
+  note: string;
+};
+
+export type ScenarioInspectorViewModel = {
+  title: string;
+  description: string;
+  operations: InspectorOperationItem[];
+  expectedPolicies: string[];
+  flowSummary?: string;
+  inconclusive: AttackDslFinding[];
+  missingOrSuspect: AttackDslFinding[];
+};
+
+export type ScenarioTimelineViewModel = {
+  minTime: number;
+  maxTime: number;
+  currentTime: number;
+  ticks: TimelineTickViewModel[];
+  lanes: TimelineLaneViewModel[];
+  segments: TimelineSegmentViewModel[];
+  markers: TimelineMarkerViewModel[];
+  inspector: ScenarioInspectorViewModel;
+};

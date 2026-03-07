@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActionSpaceReport, AttackDslReport } from "./domain-types";
 import {
+  buildScenarioTimelineViewModel,
   buildTimelineBoard,
   deriveTimelineFlows,
   findScenarioById,
@@ -69,6 +70,50 @@ describe("buildTimelineBoard", () => {
     expect(board.clips.some((clip) => clip.category === "policy")).toBe(true);
     expect(board.clips.some((clip) => clip.category === "flow")).toBe(true);
     expect(board.markers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildScenarioTimelineViewModel", () => {
+  it("normalizes operations to fixed lane keys and inspector sections", () => {
+    const scenario = findScenarioById(sampleAttackDslReport, "entrypoint-callback-2-expiry");
+    const flow = deriveTimelineFlows(sampleActionSpaceReport).find((item) => {
+      return item.callbackEntrypointId === scenario.entrypointId;
+    });
+    const viewModel = buildScenarioTimelineViewModel({
+      scenario,
+      flow,
+      inconclusive: [],
+      missingOrSuspect: [],
+    });
+
+    expect(viewModel.lanes.map((lane) => lane.key)).toEqual([
+      "request",
+      "advanceTime",
+      "replay",
+      "policyCheck",
+      "flow",
+    ]);
+    expect(
+      viewModel.segments.some((segment) => segment.laneKey === "advanceTime"),
+    ).toBe(true);
+    expect(viewModel.inspector.operations.some((item) => item.type === "replay")).toBe(
+      true,
+    );
+  });
+
+  it("omits flow summary and flow segments when matching flow does not exist", () => {
+    const scenario = findScenarioById(sampleAttackDslReport, "entrypoint-callback-2-expiry");
+    const viewModel = buildScenarioTimelineViewModel({
+      scenario,
+      flow: undefined,
+      inconclusive: [],
+      missingOrSuspect: [],
+    });
+
+    expect(viewModel.inspector.flowSummary).toBeUndefined();
+    expect(viewModel.segments.some((segment) => segment.laneKey === "flow")).toBe(
+      false,
+    );
   });
 });
 
