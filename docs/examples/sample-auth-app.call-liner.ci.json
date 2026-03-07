@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "outputDir": "artifacts/call-liner",
+  "projects": [
+    {
+      "id": "auth-app",
+      "root": "apps/auth-app",
+      "tasks": [
+        {
+          "id": "parse-auth-app",
+          "kind": "analyze",
+          "clientEntry": "app",
+          "clientFramework": "react-router",
+          "outputAstJson": true
+        },
+        {
+          "id": "github-oauth",
+          "kind": "oauth-two-step",
+          "authorizeLoaderFile": "app/routes/auth+/github+/_index.tsx",
+          "callbackLoaderFile": "app/routes/auth+/github+/callback.tsx",
+          "authorizeUrl": "https://app.test/auth/github",
+          "callbackUrlBase": "https://app.test/auth/github/callback",
+          "stateFuzzing": true,
+          "specValidate": true,
+          "failOnVulnerability": true,
+          "env": {
+            "GITHUB_CLIENT_ID": "dummy-client-id",
+            "GITHUB_CLIENT_SECRET": "dummy-client-secret",
+            "AUTHORIZE_URL": "https://github.com/login/oauth/authorize",
+            "TOKEN_URL": "https://github.com/login/oauth/access_token",
+            "APP_ORIGIN": "https://app.test",
+            "SESSION_SECRET": "dummy-session-secret"
+          }
+        },
+        {
+          "id": "github-app-oauth",
+          "kind": "oauth-two-step",
+          "authorizeLoaderFile": "app/routes/auth+/github-app+/_index.tsx",
+          "callbackLoaderFile": "app/routes/auth+/github-app+/callback.tsx",
+          "authorizeUrl": "https://app.test/auth/github-app",
+          "callbackUrlBase": "https://app.test/auth/github-app/callback",
+          "stateFuzzing": true,
+          "specValidate": true,
+          "failOnVulnerability": true,
+          "env": {
+            "GITHUB_APP_CLIENT_ID": "dummy-client-id",
+            "GITHUB_APP_CLIENT_SECRET": "dummy-client-secret",
+            "GITHUB_APP_AUTHORIZE_URL": "https://github.com/login/oauth/authorize",
+            "GITHUB_APP_TOKEN_URL": "https://github.com/login/oauth/access_token",
+            "APP_ORIGIN": "https://app.test",
+            "SESSION_SECRET": "dummy-session-secret"
+          }
+        },
+        {
+          "id": "resource-oauth",
+          "kind": "oauth-two-step",
+          "authorizeLoaderFile": "app/routes/auth+/resource+/_index.tsx",
+          "callbackLoaderFile": "app/routes/auth+/resource+/callback.tsx",
+          "authorizeUrl": "https://app.test/auth/resource",
+          "callbackUrlBase": "https://app.test/auth/resource/callback",
+          "stateFuzzing": true,
+          "specValidate": true,
+          "failOnVulnerability": true,
+          "env": {
+            "RESOURCE_SERVER_BASE_URL": "https://resource.test",
+            "RESOURCE_OAUTH_AUTHORIZE_URL": "https://resource.test/oauth/authorize",
+            "RESOURCE_OAUTH_TOKEN_URL": "https://resource.test/oauth/token",
+            "RESOURCE_PROTECTED_API_URL": "https://resource.test/api/protected",
+            "RESOURCE_OAUTH_CLIENT_ID": "sample-client",
+            "RESOURCE_OAUTH_CLIENT_SECRET": "sample-secret",
+            "RESOURCE_OAUTH_SCOPE": "read",
+            "APP_ORIGIN": "https://app.test",
+            "SESSION_SECRET": "dummy-session-secret"
+          }
+        }
+      ]
+    },
+    {
+      "id": "resource-server",
+      "root": "apps/resource-server",
+      "tasks": [
+        {
+          "id": "parse-resource-server",
+          "kind": "analyze",
+          "clientEntry": "app",
+          "clientFramework": "react-router",
+          "outputAstJson": true
+        },
+        {
+          "id": "protected-resource-no-token",
+          "kind": "single",
+          "loaderFile": "app/routes/api.protected.ts",
+          "url": "https://resource.test/api/protected",
+          "expectStatus": 401
+        }
+      ]
+    }
+  ]
+}

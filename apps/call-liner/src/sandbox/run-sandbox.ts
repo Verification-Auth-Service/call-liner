@@ -166,6 +166,36 @@ type OauthRuntimeDepsFactory = (
  * - oauth-two-step: 標準出力に { steps, callbackRequest, cookieJar, trace } を JSON 表示
  */
 export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
+  const output = await runSandboxFromArgs(rawArgs);
+  console.log(JSON.stringify(output.result, null, 2));
+
+  // single シナリオだけ、補完可能な callback URL なら再現コマンドを補助表示する。
+  if (output.sampleCommand) {
+    console.error("不足パラメータを補完したサンプルコマンド:");
+    console.error(output.sampleCommand);
+  }
+};
+
+/**
+ * サンドボックス CLI 引数を解釈し、CI から再利用可能な実行結果を返す。
+ *
+ * 入力例:
+ * - ["--loader-file", "/tmp/callback.tsx", "--url", "https://app.test/auth/github/callback?code=a&state=b"]
+ * - ["--scenario", "oauth-two-step", "--authorize-loader-file", "/tmp/authorize.tsx", "--callback-loader-file", "/tmp/callback.tsx", "--authorize-url", "https://app.test/auth/github", "--callback-url-base", "https://app.test/auth/github/callback"]
+ *
+ * 出力例:
+ * - { scenario: "single", result: { steps, cookieJar, trace } }
+ * - { scenario: "oauth_two_step", result: { steps, callbackRequest, cookieJar, trace } }
+ */
+export const runSandboxFromArgs = async (
+  rawArgs: string[],
+): Promise<{
+  scenario: ParsedCliArgs["scenario"];
+  result:
+    | Awaited<ReturnType<typeof runSingleScenario>>
+    | Awaited<ReturnType<typeof runOauthTwoStepScenario>>;
+  sampleCommand?: string;
+}> => {
   const parsed = parseSandboxCliArgs(rawArgs);
   const originalEnvValues = applyEnvOverrides(
     parsed.scenario === "oauth_two_step"
@@ -178,24 +208,24 @@ export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
 
     // single モードは既存 executor ベースの timeline 実行を使う。
     if (parsed.scenario === "single") {
-      const singleOutput = await runSingleScenario(parsed, sessionRecord);
-      console.log(JSON.stringify(singleOutput, null, 2));
+      const result = await runSingleScenario(parsed, sessionRecord);
       const sampleCommand = buildMissingOauthParamSampleCommand(
         parsed,
-        singleOutput.steps,
+        result.steps,
         rawArgs,
       );
 
-      // callback URL の code/state が不足している場合は再現用コマンドを補助表示する。
-      if (sampleCommand) {
-        console.error("不足パラメータを補完したサンプルコマンド:");
-        console.error(sampleCommand);
-      }
-      return;
+      return {
+        scenario: parsed.scenario,
+        result,
+        sampleCommand,
+      };
     }
 
-    const oauthOutput = await runOauthTwoStepScenario(parsed, sessionRecord);
-    console.log(JSON.stringify(oauthOutput, null, 2));
+    return {
+      scenario: parsed.scenario,
+      result: await runOauthTwoStepScenario(parsed, sessionRecord),
+    };
   } finally {
     restoreEnvOverrides(originalEnvValues);
   }
