@@ -4,7 +4,12 @@ import type {
   TimelineMarkerViewModel,
   TimelineSegmentViewModel,
 } from "../domain-types";
-import { getMarkerStyle, getSegmentStyle, timelineStyles } from "../react-styles";
+import {
+  getMarkerStyle,
+  getSegmentStyle,
+  getStateChipStyle,
+  timelineStyles,
+} from "../react-styles";
 
 type TimelineSegmentsProps = {
   segments: TimelineSegmentViewModel[];
@@ -16,6 +21,9 @@ type TimelineSegmentsProps = {
 
 const MIN_SEGMENT_WIDTH = 10;
 const SEGMENT_HEIGHT = 34;
+const STATE_CHIP_HEIGHT = 14;
+const STATE_CHIP_TOP = 6;
+const STATE_CHIP_GAP = 4;
 
 /**
  * 同一座標系でセグメントとマーカーを描画する。
@@ -36,13 +44,22 @@ export function TimelineSegments(props: TimelineSegmentsProps) {
           MIN_SEGMENT_WIDTH,
           props.timeToPx(segment.startMs + segment.durationMs) - left,
         );
-        const top = laneIndex * props.laneHeight + (props.laneHeight - SEGMENT_HEIGHT) / 2;
+        const top =
+          segment.kind === "chip"
+            ? laneIndex * props.laneHeight +
+              STATE_CHIP_TOP +
+              (segment.stackIndex ?? 0) * (STATE_CHIP_HEIGHT + STATE_CHIP_GAP)
+            : laneIndex * props.laneHeight + (props.laneHeight - SEGMENT_HEIGHT) / 2;
+        const style =
+          segment.kind === "chip"
+            ? getStateChipStyle(left, top, width)
+            : getSegmentStyle(segment.tone, left, top, width, segment.kind === "event");
 
         return (
           <div
             key={segment.id}
             className={`timelineSegment tone-${segment.tone} kind-${segment.kind}`}
-            style={getSegmentStyle(segment.tone, left, top, width, segment.kind === "event")}
+            style={style}
             title={segment.label}
           >
             <span className="timelineSegmentLabel" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>

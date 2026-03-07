@@ -11,7 +11,7 @@ type TimelinePanelProps = {
 };
 
 const PIXELS_PER_UNIT = 1;
-const LANE_HEIGHT = 48;
+const LANE_HEIGHT = 60;
 
 /**
  * タイムライン全体の状態管理とスクロール同期を担当する。

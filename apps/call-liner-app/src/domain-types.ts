@@ -19,6 +19,12 @@ export type AttackDslFetchStub = {
   };
 };
 
+export type AttackObservedState = Partial<{
+  session: "missing" | "valid" | "expired";
+  code: "present" | "replayed";
+  token: "issued" | "blocked";
+}>;
+
 export type AttackDslOperation =
   | {
       id: string;
@@ -34,6 +40,7 @@ export type AttackDslOperation =
       };
       session: Record<string, string>;
       fetchStubs?: AttackDslFetchStub[];
+      observedState?: AttackObservedState;
       note: string;
     }
   | {
@@ -45,6 +52,7 @@ export type AttackDslOperation =
       };
       type: "advance_time";
       ms: number;
+      observedState?: AttackObservedState;
       note: string;
     }
   | {
@@ -56,6 +64,7 @@ export type AttackDslOperation =
       };
       type: "replay";
       target: string;
+      observedState?: AttackObservedState;
       note: string;
     };
 
@@ -145,6 +154,7 @@ export type TimelineLaneKey =
   | "request"
   | "advanceTime"
   | "replay"
+  | "state"
   | "policyCheck"
   | "flow";
 
@@ -152,10 +162,11 @@ export type TimelineSegmentTone =
   | "request"
   | "advanceTime"
   | "replay"
+  | "state"
   | "policy"
   | "flow";
 
-export type TimelineSegmentKind = "bar" | "event";
+export type TimelineSegmentKind = "bar" | "event" | "chip";
 
 export type TimelineLaneViewModel = {
   key: TimelineLaneKey;
@@ -171,6 +182,7 @@ export type TimelineSegmentViewModel = {
   label: string;
   tone: TimelineSegmentTone;
   kind: TimelineSegmentKind;
+  stackIndex?: number;
 };
 
 export type TimelineMarkerViewModel = {

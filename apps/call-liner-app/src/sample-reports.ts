@@ -50,6 +50,11 @@ const sampleScenarios: AttackDslScenario[] = [
           "oauth:state": "expected-state",
           "oauth:verifier": "expected-verifier",
         },
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "issued",
+        },
         note: "初回 callback 実行",
       },
       {
@@ -61,6 +66,10 @@ const sampleScenarios: AttackDslScenario[] = [
           entrypointId: "entrypoint-callback-1",
         },
         target: "initial-callback",
+        observedState: {
+          code: "replayed",
+          token: "blocked",
+        },
         note: "同じ request を再送",
       },
     ],
@@ -89,6 +98,11 @@ const sampleScenarios: AttackDslScenario[] = [
           "oauth:state": "expected-state",
           "oauth:verifier": "expected-verifier",
         },
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "issued",
+        },
         note: "期限前 callback 実行",
       },
       {
@@ -100,6 +114,9 @@ const sampleScenarios: AttackDslScenario[] = [
           entrypointId: "entrypoint-callback-2",
         },
         ms: 610000,
+        observedState: {
+          session: "expired",
+        },
         note: "有効期限を超えるまで進める",
       },
       {
@@ -111,6 +128,11 @@ const sampleScenarios: AttackDslScenario[] = [
           entrypointId: "entrypoint-callback-2",
         },
         target: "before-expiry",
+        observedState: {
+          session: "expired",
+          code: "replayed",
+          token: "blocked",
+        },
         note: "期限切れ後 replay",
       },
     ],
