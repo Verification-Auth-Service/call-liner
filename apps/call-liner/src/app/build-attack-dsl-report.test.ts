@@ -65,6 +65,7 @@ describe("buildAttackDslReport", () => {
     });
 
     expect(report.version).toBe(1);
+    expect(report.dslVersion).toBe(2);
     expect(report.generatedAt).toBe("2026-03-06T01:02:03.000Z");
     expect(report.summary.callbackEntrypoints).toBe(1);
     expect(report.summary.scenarios).toBe(8);
@@ -107,6 +108,26 @@ describe("buildAttackDslReport", () => {
     expect(firstOperation.fetchStubs?.[0]?.matcher).toBe(
       "https://github.com/login/oauth/access_token",
     );
+    expect(firstOperation.at).toBe(0);
+    expect(firstOperation.expect).toEqual(["token_failure_safe_redirect"]);
+    expect(firstOperation.derivedFrom.entrypointId).toBe("entrypoint-1");
+
+    const replayScenario = report.scenarios.find((scenario) => scenario.id.endsWith("-replay"));
+
+    // replay シナリオでは request 後の replay に policy expectation が紐づく必要がある。
+    if (!replayScenario) {
+      throw new Error("Expected replay scenario");
+    }
+
+    const replayOperation = replayScenario.operations[1];
+
+    if (!replayOperation || replayOperation.type !== "replay") {
+      throw new Error("Expected second operation to be a replay");
+    }
+
+    expect(replayOperation.id).toBe("replay-initial-callback");
+    expect(replayOperation.at).toBe(10);
+    expect(replayOperation.expect).toEqual(["replay_rejected"]);
   });
 
   it("returns empty scenarios when callback entrypoints are absent", () => {

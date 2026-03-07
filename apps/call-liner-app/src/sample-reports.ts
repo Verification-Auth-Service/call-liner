@@ -37,6 +37,11 @@ const sampleScenarios: AttackDslScenario[] = [
       {
         type: "request",
         id: "initial-callback",
+        at: 0,
+        expect: [],
+        derivedFrom: {
+          entrypointId: "entrypoint-callback-1",
+        },
         request: {
           url: "https://app.test/auth+/github+/callback?code=replay-code&state=expected-state",
           method: "GET",
@@ -49,6 +54,12 @@ const sampleScenarios: AttackDslScenario[] = [
       },
       {
         type: "replay",
+        id: "replay-initial-callback",
+        at: 10,
+        expect: ["replay_rejected"],
+        derivedFrom: {
+          entrypointId: "entrypoint-callback-1",
+        },
         target: "initial-callback",
         note: "同じ request を再送",
       },
@@ -65,6 +76,11 @@ const sampleScenarios: AttackDslScenario[] = [
       {
         type: "request",
         id: "before-expiry",
+        at: 0,
+        expect: [],
+        derivedFrom: {
+          entrypointId: "entrypoint-callback-2",
+        },
         request: {
           url: "https://app.test/auth+/resource+/callback?code=expiring-code&state=expected-state",
           method: "GET",
@@ -77,11 +93,23 @@ const sampleScenarios: AttackDslScenario[] = [
       },
       {
         type: "advance_time",
+        id: "advance-expiry-window",
+        at: 10,
+        expect: [],
+        derivedFrom: {
+          entrypointId: "entrypoint-callback-2",
+        },
         ms: 610000,
         note: "有効期限を超えるまで進める",
       },
       {
         type: "replay",
+        id: "replay-after-expiry",
+        at: 610010,
+        expect: ["session_expiry_enforced"],
+        derivedFrom: {
+          entrypointId: "entrypoint-callback-2",
+        },
         target: "before-expiry",
         note: "期限切れ後 replay",
       },
@@ -92,6 +120,7 @@ const sampleScenarios: AttackDslScenario[] = [
 
 export const sampleAttackDslReport: AttackDslReport = {
   version: 1,
+  dslVersion: 2,
   generatedAt: "2026-03-06T02:26:16.546Z",
   summary: {
     callbackEntrypoints: 2,

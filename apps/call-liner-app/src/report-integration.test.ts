@@ -96,9 +96,21 @@ describe("buildScenarioTimelineViewModel", () => {
     expect(
       viewModel.segments.some((segment) => segment.laneKey === "advanceTime"),
     ).toBe(true);
+    expect(
+      viewModel.segments.some(
+        (segment) =>
+          segment.laneKey === "policyCheck" &&
+          segment.label.includes("session_expiry_enforced"),
+      ),
+    ).toBe(true);
     expect(viewModel.inspector.operations.some((item) => item.type === "replay")).toBe(
       true,
     );
+    expect(
+      viewModel.inspector.operations.some(
+        (item) => item.id === "replay-after-expiry" && item.expect[0] === "session_expiry_enforced",
+      ),
+    ).toBe(true);
   });
 
   it("omits flow summary and flow segments when matching flow does not exist", () => {
@@ -127,6 +139,7 @@ describe("report parsers", () => {
     );
 
     expect(parsedAttack.scenarios.length).toBeGreaterThan(0);
+    expect(parsedAttack.dslVersion).toBe(2);
     expect(parsedAttack.summary?.generated).toBe(parsedAttack.scenarios.length);
     expect(parsedAttack.generated?.length).toBe(parsedAttack.scenarios.length);
     expect(parsedAction.entrypoints.length).toBeGreaterThan(0);
