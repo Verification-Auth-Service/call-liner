@@ -14,6 +14,12 @@ export type AttackDslFetchStub = {
   };
 };
 
+export type AttackObservedState = Partial<{
+  session: "missing" | "valid" | "expired";
+  code: "present" | "replayed";
+  token: "issued" | "blocked";
+}>;
+
 export type AttackDslOperation =
   | {
       id: string;
@@ -29,6 +35,7 @@ export type AttackDslOperation =
       };
       session: Record<string, string>;
       fetchStubs?: AttackDslFetchStub[];
+      observedState?: AttackObservedState;
       note: string;
     }
   | {
@@ -40,6 +47,7 @@ export type AttackDslOperation =
       };
       type: "advance_time";
       ms: number;
+      observedState?: AttackObservedState;
       note: string;
     }
   | {
@@ -51,6 +59,7 @@ export type AttackDslOperation =
       };
       type: "replay";
       target: string;
+      observedState?: AttackObservedState;
       note: string;
     };
 
@@ -480,6 +489,10 @@ function buildMissingInputScenario(
           method: "GET",
         },
         session: buildBaseSession(),
+        observedState: {
+          session: "valid",
+          token: "blocked",
+        },
         note: "code/state を送らない",
       },
     ], expectedPolicyIds),
@@ -513,6 +526,11 @@ function buildTamperedStateScenario(
         session: buildBaseSession({
           "oauth:state": "original-state",
         }),
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "blocked",
+        },
         note: "query.state と session state を意図的に不一致にする",
       },
     ], expectedPolicyIds),
@@ -544,6 +562,11 @@ function buildMissingSessionScenario(
           method: "GET",
         },
         session: {},
+        observedState: {
+          session: "missing",
+          code: "present",
+          token: "blocked",
+        },
         note: "cookie/session を空で実行する",
       },
     ], expectedPolicyIds),
@@ -585,6 +608,11 @@ function buildTokenFailureScenario(
             },
           },
         ],
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "blocked",
+        },
         note: "token endpoint を 500 に固定する",
       },
     ], expectedPolicyIds),
@@ -632,6 +660,11 @@ function buildTokenExtremeExpiryScenario(
             },
           },
         ],
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "issued",
+        },
         note: "expires_in に 32bit 上限値を与える",
       },
     ], expectedPolicyIds),
@@ -673,6 +706,11 @@ function buildResourceFailureScenario(
             },
           },
         ],
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "blocked",
+        },
         note: "resource endpoint の異常系を固定する",
       },
     ], expectedPolicyIds),
@@ -704,12 +742,21 @@ function buildReplayScenario(
           method: "GET",
         },
         session: buildBaseSession(),
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "issued",
+        },
         note: "初回 callback を実行する",
       },
       {
         type: "replay",
         id: "replay-initial-callback",
         target: "initial-callback",
+        observedState: {
+          code: "replayed",
+          token: "blocked",
+        },
         note: "同じ request を再送する",
       },
     ], expectedPolicyIds),
@@ -741,18 +788,31 @@ function buildAdvanceTimeScenario(
           method: "GET",
         },
         session: buildBaseSession(),
+        observedState: {
+          session: "valid",
+          code: "present",
+          token: "issued",
+        },
         note: "有効期限前の callback を実行する",
       },
       {
         type: "advance_time",
         id: "advance-expiry-window",
         ms: ADVANCE_EXPIRY_MS,
+        observedState: {
+          session: "expired",
+        },
         note: "session の有効期限を超える時間を進める",
       },
       {
         type: "replay",
         id: "replay-after-expiry",
         target: "before-expiry",
+        observedState: {
+          session: "expired",
+          code: "replayed",
+          token: "blocked",
+        },
         note: "期限切れ後に同じ callback を再実行する",
       },
     ], expectedPolicyIds),
