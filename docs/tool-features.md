@@ -6,6 +6,19 @@
 
 ### 1.1 通常 CLI（`pnpm dev -- ...`）
 
+- 主コマンドと実行意義:
+  - `pnpm dev -- --client-entry <path>`
+    - 意義: 解析の起点を固定し、対象機能の可視化を最短で開始できる。
+    - できる検証: エントリ解決可否、action/resource 抽出の成立可否。
+    - 目的: 「まず解析が通るか」を確認し、以降の調査基盤を作る。
+  - `pnpm dev -- --client-entry <path> --resource-entry <path>`
+    - 意義: client 側と resource 側の対応関係を同時に確認できる。
+    - できる検証: エンドポイント参照漏れ、依存切れ、接続不整合。
+    - 目的: 片側だけ見たときの見落としを防ぎ、全体整合を確認する。
+  - `pnpm dev -- --client-entry <path> -d --ast-json`
+    - 意義: 人間向けデバッグ情報と機械処理向け JSON を同時取得できる。
+    - できる検証: 抽出ロジックの中間結果、CI 差分比較、再解析再現性。
+    - 目的: 解析ズレの原因調査と自動検証連携を一回の実行で行う。
 - TypeScript/TSX エントリを静的解析してレポート出力する。
 - エントリポイント一覧（`report/entrypoints.json`）を生成する。
 - `-d` でデバッグ AST を出力する。
@@ -14,11 +27,41 @@
 
 ### 1.2 サンドボックス CLI（`pnpm --filter call-liner sandbox:run -- ...`）
 
+- 主コマンドと実行意義:
+  - `pnpm --filter call-liner sandbox:run -- --loader-file <path> --url <request-url>`
+    - 意義: HTTP サーバ起動なしで対象 loader を直接検査できる。
+    - できる検証: 単体 loader の正常系/異常系レスポンス、入力依存分岐。
+    - 目的: 最小コストで再現ケースを作り、初期切り分けを高速化する。
+  - `pnpm --filter call-liner sandbox:run -- --loader-file <path> --url <request-url> --advance-ms 1000 --replay initial`
+    - 意義: 時間経過と再送を人工的に発生させ、実運用事故条件を再現できる。
+    - できる検証: TTL 境界、リプレイ耐性、二重送信時の防御。
+    - 目的: 通常アクセス試験では見つかりにくい時系列バグを検出する。
+  - `pnpm --filter call-liner sandbox:run -- --scenario oauth-two-step --authorize-loader-file <path> --callback-loader-file <path> --authorize-url <request-url> --callback-url-base <request-url>`
+    - 意義: OAuth の authorize -> callback を分断せず一連で確認できる。
+    - できる検証: state 引き回し、リダイレクト連携、セッション受け渡し。
+    - 目的: 本番導線に近い認証シーケンスの妥当性確認。
+  - `pnpm --filter call-liner sandbox:run -- --scenario oauth-two-step --authorize-loader-file <path> --callback-loader-file <path> --authorize-url <request-url> --callback-url-base <request-url> --state-fuzzing --spec-validate`
+    - 意義: 攻撃パターン生成と副作用ベース判定を同時実行し、脆弱性を機械的に検出できる。
+    - できる検証: state 欠落/改ざん/再送時に token fetch・cookie set・DB write が起きないこと。
+    - 目的: 「HTTP status だけ正常」に見える偽陰性を減らし、実害ベースで安全性評価する。
 - `loader` を関数レベルで直接実行する（HTTP サーバ起動不要）。
 - CookieJar/仮想時刻/trace を状態として持ち、再現可能に実行する。
 - `advance_time`（時間ジャンプ）と `replay`（過去リクエスト再送）で時系列検証を行う。
 - OAuth 2-step（authorize -> callback）を連続実行して `state` の正常/改ざん/欠落などを検証する。
 - fetch / session / redirect / DB クライアントをスタブ注入できる。
+
+### 1.3 オプションを付ける意義（要点）
+
+- 再現性を上げるため:
+  - `--session` / `--env` / `--method` / `--request-id` で入力条件を固定し、同じケースを何度でも再現できる。
+- 誤検知を減らすため:
+  - `--scenario` / `--state-mode` / `--client-framework` / `--resource-framework` で実行文脈を明示し、意図しない解釈を避ける。
+- 攻撃/異常系を意図的に作るため:
+  - `--state-fuzzing` / `--graph-explore` / `--advance-ms` / `--replay` で通常アクセスだけでは見つからない欠陥を露出させる。
+- 判定根拠を副作用まで拡張するため:
+  - `--spec-validate` + `--database-strategy memory-client` で HTTP status だけでなく token fetch / cookie / DB write まで検証対象にできる。
+- 調査効率を上げるため:
+  - `-d` / `--ast-json` で解析結果を可視化し、どこで認識がズレたかを短時間で切り分けできる。
 
 ---
 
@@ -140,6 +183,105 @@
     - `Set-Cookie`（`cookie_set`）
     - DB write（`memory-client` の `upsert/create/update/delete` など）
   - HTTP status のみでは判定しない（`302` でも副作用が無ければ許容）。
+
+### 3.5 オプション別「何ができるか / 何を検証できるか / 目的」
+
+#### 3.5.1 single シナリオ主要オプション
+
+- `--loader-file` / `--url`
+  - できること: 任意 route loader を任意 URL で直接起動。
+  - できる検証: パラメータ分岐、ヘッダ/クエリ依存挙動、ルート単体の成功/失敗。
+  - 目的: サーバ全体起動なしで最短経路のデバッグを行う。
+- `--method`
+  - できること: `GET` 以外のメソッドで実行。
+  - できる検証: メソッド制御（許可/拒否）の妥当性。
+  - 目的: REST 想定違反や不正メソッド受理の検出。
+- `--request-id`
+  - できること: 各 request に識別子を付ける。
+  - できる検証: `--replay` でのターゲット指定、複数実行時の追跡精度。
+  - 目的: trace 可読性と再実行制御の安定化。
+- `--advance-ms`
+  - できること: 仮想時刻を進める。
+  - できる検証: 有効期限切れ cookie / nonce / state の境界挙動。
+  - 目的: 待機時間なしで TTL 系不具合を再現する。
+- `--replay`
+  - できること: 過去リクエストを ID または操作番号で再送。
+  - できる検証: リプレイ耐性、冪等性、二重送信時の保護。
+  - 目的: 実運用で起こる再送・重複アクセスに対する安全性確認。
+- `--session key=value`
+  - できること: セッション初期値を注入。
+  - できる検証: 認証前/認証後/破損セッションの分岐。
+  - 目的: 依存状態を明示的に作り、分岐テストを短縮する。
+- `--env key=value`
+  - できること: 環境変数依存をテスト用に上書き。
+  - できる検証: 設定欠落時のエラー、誤設定時のフェイルセーフ。
+  - 目的: ローカル環境差分を排除して設定起因バグを切り分ける。
+- `--database-strategy` / `--database-model` / `--database-global`
+  - できること: DB 呼び出し先をメモリクライアントへ置換し、モデルごとに操作を記録。
+  - できる検証: 認証失敗ケースでの不要 write、成功時の期待 write。
+  - 目的: 外部 DB なしで副作用検証を可能にする。
+- `--stub-refresh-token`
+  - できること: OAuth token レスポンスへ refresh token を付与。
+  - できる検証: refresh token 保存・更新・再利用フロー。
+  - 目的: 長期セッション運用に関わる処理の検証準備。
+
+#### 3.5.2 oauth-two-step 主要オプション
+
+- `--authorize-loader-file` / `--callback-loader-file` / `--authorize-url` / `--callback-url-base`
+  - できること: authorize -> callback の一連処理を分離せず通し実行。
+  - できる検証: state 連携、リダイレクト連携、セッション受け渡し。
+  - 目的: OAuth の実運用シーケンスを最小構成で再現する。
+- `--callback-code`
+  - できること: callback 時の `code` を任意指定。
+  - できる検証: code 欠落/不正時の拒否、エラー応答処理。
+  - 目的: 認可サーバ応答異常への耐性確認。
+- `--state-mode`
+  - できること: `match_authorize` / `tampered` / `missing` / `fixed` で callback state を制御。
+  - できる検証: state mismatch, missing state, 固定値依存の脆弱性。
+  - 目的: CSRF 防御の中核要件を直接検証する。
+- `--callback-state`
+  - できること: fixed モードなどで callback state の実値を注入。
+  - できる検証: 実装が「値比較」ではなく「存在確認のみ」になっていないか。
+  - 目的: state 判定ロジックの厳密性を検査する。
+- `--state-fuzzing`
+  - できること: 既知攻撃パターンを一括生成・実行。
+  - できる検証: replay / missing / different / double callback / expiry の網羅。
+  - 目的: 手動ケース作成漏れを減らし、脆弱性発見率を上げる。
+- `--graph-explore`
+  - できること: action 順序の順列に加え、状態付き拡張パスを探索。
+  - できる検証: 「順番が想定外」のときの破綻、再入・多重実行の弱点。
+  - 目的: 正常順序前提の暗黙バグを発見する。
+- `--spec-validate`
+  - できること: 副作用ベースで violation/vulnerability を自動判定。
+  - できる検証: reject 必須ケースで token fetch / cookie set / DB write が起きていないか。
+  - 目的: status code だけでは見えない「実害のある成功」を検知する。
+- `--state-expiry-ms`
+  - できること: callback の遅延時間を制御。
+  - できる検証: state 有効期限超過時の拒否可否。
+  - 目的: 時間境界条件に対する仕様準拠確認。
+- `--refresh-loader-file` / `--refresh-url`
+  - できること: refresh action を探索対象に追加。
+  - できる検証: authorize/callback/refresh の相互作用、更新系の順序依存バグ。
+  - 目的: 長期運用のトークン更新まで含めた安全性検査を行う。
+
+#### 3.5.3 通常 CLI 主要オプション
+
+- `--client-entry` / `--resource-entry`
+  - できること: 解析対象エントリを明示し、レポート起点を固定。
+  - できる検証: どのエントリがどの action/resource を持つかの構造確認。
+  - 目的: 誤った入口解析による見落としを防ぐ。
+- `--client-framework` / `--resource-framework`
+  - できること: framework 前提で解析器を切替。
+  - できる検証: framework 特有パターンの抽出精度。
+  - 目的: 汎用解析との差異を埋め、誤認識を減らす。
+- `-d`
+  - できること: デバッグ AST を出力。
+  - できる検証: ノード認識・分岐抽出・依存解決の中間結果。
+  - 目的: 解析不一致の原因特定を高速化。
+- `--ast-json`
+  - できること: 集約 AST / action 空間 / 攻撃 DSL を JSON 出力。
+  - できる検証: 自動処理向けの構造検査、差分比較、CI 連携。
+  - 目的: 人手確認から機械検証へ接続する。
 
 ---
 

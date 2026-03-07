@@ -126,6 +126,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   });
 
+  it("prints sample command when callback validation fails via redirect", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-cli-hint-redirect-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "callback.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) {
+    return redirect("https://app.test/error?title=fail&message=code+or+state+missing&code=missing_params");
+  }
+  return new Response("ok", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+      ]);
+
+      const errorCalls = errorSpy.mock.calls.map((call) => String(call[0] ?? ""));
+      const sampleCommand = errorCalls.find((message) =>
+        message.includes("pnpm --filter call-liner sandbox:run --"),
+      );
+
+      expect(errorCalls.some((message) => message.includes("不足パラメータを補完したサンプルコマンド"))).toBe(
+        true,
+      );
+      expect(sampleCommand).toContain(
+        "https://app.test/githubinfo?code=sample-code&state=sample-state",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs oauth-two-step scenario and prints step results as json", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-oauth-cli-"));
 

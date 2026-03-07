@@ -223,20 +223,28 @@ const buildMissingOauthParamSampleCommand = (
     .reverse()
     .find((step) => step.type === "request" || step.type === "replay");
 
-  // 失敗レスポンスでない場合は不足パラメータの補完提案を出さない。
-  if (!latestHttpStep || latestHttpStep.status < 400) {
+  // HTTP step が無い場合は不足パラメータの補完提案を作れない。
+  if (!latestHttpStep) {
     return undefined;
   }
 
+  // callback 失敗は 4xx 本文だけでなく error ページへの 3xx redirect でも返りうる。
+  const isErrorLikeStatus = latestHttpStep.status >= 300;
   const errorBody = latestHttpStep.body.toLowerCase();
+  const locationText = latestHttpStep.location?.toLowerCase() ?? "";
   const hintsAtCodeStateValidation =
     errorBody.includes("code") ||
     errorBody.includes("state") ||
     errorBody.includes("不足") ||
-    errorBody.includes("missing");
+    errorBody.includes("missing") ||
+    locationText.includes("code=missing_params") ||
+    locationText.includes("code") ||
+    locationText.includes("state") ||
+    locationText.includes("不足") ||
+    locationText.includes("missing");
 
-  // エラー本文が code/state 検証に見えない場合はノイズ回避のため提案しない。
-  if (!hintsAtCodeStateValidation) {
+  // 失敗系で、かつ code/state 検証エラーに見える場合だけ提案を出す。
+  if (!isErrorLikeStatus || !hintsAtCodeStateValidation) {
     return undefined;
   }
 
