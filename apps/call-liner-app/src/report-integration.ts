@@ -1,5 +1,6 @@
 import type {
   ActionSpaceEntrypoint,
+  AttackObservedState,
   ActionSpaceReport,
   AttackDslOperation,
   AttackDslReport,
@@ -18,6 +19,7 @@ import type {
 
 const REQUEST_DURATION_MS = 380;
 const REPLAY_DURATION_MS = 320;
+const STATE_CHIP_DURATION_MS = 220;
 const TICK_STEP_MS = 100;
 const MAJOR_TICK_STEP_MS = 500;
 const CURSOR_START_MS = 120;
@@ -39,6 +41,11 @@ const TIMELINE_LANES: TimelineLaneViewModel[] = [
     key: "replay",
     label: "Replay",
     description: "再送リクエスト",
+  },
+  {
+    key: "state",
+    label: "State",
+    description: "session/code/token の状態",
   },
   {
     key: "policyCheck",
@@ -73,6 +80,31 @@ function toOperationDurationMs(operation: AttackDslOperation): number {
 
   // replay は request より短いイベントとして表示する。
   return REPLAY_DURATION_MS;
+}
+
+function toStateEntries(
+  state: AttackObservedState | undefined,
+): Array<{ key: keyof AttackObservedState; label: string; stackIndex: number }> {
+  // 状態チップは判定への寄与が大きい順に固定し、視線移動を減らす。
+  const entries: Array<{ key: keyof AttackObservedState; label: string; stackIndex: number }> = [];
+  const orderedKeys: Array<keyof AttackObservedState> = ["session", "code", "token"];
+
+  for (const [stackIndex, key] of orderedKeys.entries()) {
+    const value = state?.[key];
+
+    // 未観測の状態まで出すとノイズになるため、値があるものだけ描画する。
+    if (!value) {
+      continue;
+    }
+
+    entries.push({
+      key,
+      label: `${key}: ${value}`,
+      stackIndex,
+    });
+  }
+
+  return entries;
 }
 
 function toOperationLaneKey(operation: AttackDslOperation): TimelineLaneKey {
@@ -271,6 +303,19 @@ export function buildScenarioTimelineViewModel(params: {
       tone: toOperationTone(operation),
       kind: operation.type === "advance_time" ? "event" : "bar",
     });
+
+    for (const stateEntry of toStateEntries(operation.observedState)) {
+      segments.push({
+        id: `${scenario.id}-${operation.id}-state-${stateEntry.key}`,
+        laneKey: "state",
+        startMs,
+        durationMs: STATE_CHIP_DURATION_MS,
+        label: stateEntry.label,
+        tone: "state",
+        kind: "chip",
+        stackIndex: stateEntry.stackIndex,
+      });
+    }
 
     // request/replay は操作開始点が重要なので先頭位置にマーカーを置く。
     if (operation.type === "request" || operation.type === "replay") {

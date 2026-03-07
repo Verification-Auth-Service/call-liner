@@ -13,10 +13,21 @@ function buildViewModel(): ScenarioTimelineViewModel {
       { key: "request", label: "Request", description: "" },
       { key: "advanceTime", label: "Advance Time", description: "" },
       { key: "replay", label: "Replay", description: "" },
+      { key: "state", label: "State", description: "" },
       { key: "policyCheck", label: "Policy Check", description: "" },
       { key: "flow", label: "Flow", description: "" },
     ],
     segments: [
+      {
+        id: "seg-state",
+        laneKey: "state",
+        startMs: 500,
+        durationMs: 220,
+        label: "session: valid",
+        tone: "state",
+        kind: "chip",
+        stackIndex: 0,
+      },
       {
         id: "seg-1",
         laneKey: "request",
@@ -91,5 +102,12 @@ describe("TimelineShell", () => {
     fireEvent.pointerUp(window);
 
     expect(screen.getByText("320")).toBeInTheDocument();
+  });
+
+  it("renders the state lane chip labels", () => {
+    render(<TimelineShell viewModel={buildViewModel()} />);
+
+    expect(screen.getAllByText("State").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("session: valid").length).toBeGreaterThan(0);
   });
 });

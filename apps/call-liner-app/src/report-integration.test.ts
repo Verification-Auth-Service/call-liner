@@ -90,11 +90,22 @@ describe("buildScenarioTimelineViewModel", () => {
       "request",
       "advanceTime",
       "replay",
+      "state",
       "policyCheck",
       "flow",
     ]);
     expect(
       viewModel.segments.some((segment) => segment.laneKey === "advanceTime"),
+    ).toBe(true);
+    expect(
+      viewModel.segments.some(
+        (segment) => segment.laneKey === "state" && segment.label === "session: expired",
+      ),
+    ).toBe(true);
+    expect(
+      viewModel.segments.some(
+        (segment) => segment.laneKey === "state" && segment.label === "code: replayed",
+      ),
     ).toBe(true);
     expect(
       viewModel.segments.some(

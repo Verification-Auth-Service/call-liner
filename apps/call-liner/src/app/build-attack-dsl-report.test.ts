@@ -111,6 +111,11 @@ describe("buildAttackDslReport", () => {
     expect(firstOperation.at).toBe(0);
     expect(firstOperation.expect).toEqual(["token_failure_safe_redirect"]);
     expect(firstOperation.derivedFrom.entrypointId).toBe("entrypoint-1");
+    expect(firstOperation.observedState).toEqual({
+      session: "valid",
+      code: "present",
+      token: "blocked",
+    });
 
     const replayScenario = report.scenarios.find((scenario) => scenario.id.endsWith("-replay"));
 
@@ -128,6 +133,36 @@ describe("buildAttackDslReport", () => {
     expect(replayOperation.id).toBe("replay-initial-callback");
     expect(replayOperation.at).toBe(10);
     expect(replayOperation.expect).toEqual(["replay_rejected"]);
+    expect(replayScenario.operations[0]?.observedState).toEqual({
+      session: "valid",
+      code: "present",
+      token: "issued",
+    });
+    expect(replayOperation.observedState).toEqual({
+      code: "replayed",
+      token: "blocked",
+    });
+
+    const expiryScenario = report.scenarios.find((scenario) => scenario.id === "entrypoint-1-expiry");
+
+    // expiry シナリオでは request -> advance_time -> replay の状態変化が一貫している必要がある。
+    if (!expiryScenario) {
+      throw new Error("Expected expiry scenario");
+    }
+
+    expect(expiryScenario.operations[0]?.observedState).toEqual({
+      session: "valid",
+      code: "present",
+      token: "issued",
+    });
+    expect(expiryScenario.operations[1]?.observedState).toEqual({
+      session: "expired",
+    });
+    expect(expiryScenario.operations[2]?.observedState).toEqual({
+      session: "expired",
+      code: "replayed",
+      token: "blocked",
+    });
   });
 
   it("returns empty scenarios when callback entrypoints are absent", () => {

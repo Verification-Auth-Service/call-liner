@@ -4,6 +4,7 @@ import type { AttackDslOperation, TimelineSegmentTone } from "./domain-types";
 const segmentToneMap: Record<TimelineSegmentTone, CSSProperties> = {
   request: { background: "#2f9d5c", color: "#effff2" },
   replay: { background: "#c94a4a", color: "#fff3f3" },
+  state: { background: "#466177", color: "#eff8ff" },
   policy: { background: "#c5962c", color: "#fff7e8" },
   flow: { background: "#3f8f82", color: "#eefcf6" },
   advanceTime: { background: "#6f7d8f", color: "#f5f8fc" },
@@ -358,6 +359,25 @@ export function getSegmentStyle(
     fontWeight: 700,
     letterSpacing: "0.01em",
     ...segmentToneMap[tone],
+  };
+}
+
+/**
+ * State レーン用チップのスタイルを返す。
+ * 入力例: `getStateChipStyle(120, 8, 220)`
+ * 出力例: 小さな pill 形状の state chip style。
+ */
+export function getStateChipStyle(left: number, top: number, width: number): CSSProperties {
+  return {
+    ...getSegmentStyle("state", left, top, width, false),
+    height: "14px",
+    padding: "0 6px",
+    borderRadius: "999px",
+    fontSize: "10px",
+    lineHeight: 1,
+    letterSpacing: "0.01em",
+    border: "1px solid rgba(183, 214, 239, 0.28)",
+    boxShadow: "0 1px 2px rgba(9, 15, 22, 0.3)",
   };
 }
 
