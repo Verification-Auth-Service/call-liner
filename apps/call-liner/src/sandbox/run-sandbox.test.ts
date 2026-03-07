@@ -72,6 +72,105 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   });
 
+  it("prints sample command when callback url is missing code/state", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-cli-hint-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "callback.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) {
+    return new Response("codeまたはstateが不足しています。", { status: 400 });
+  }
+  return new Response("ok", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+        "--stub-refresh-token",
+        "rotated-refresh-token",
+        "--stub-github-repos-status",
+        "401",
+      ]);
+
+      const errorCalls = errorSpy.mock.calls.map((call) => String(call[0] ?? ""));
+      const sampleCommand = errorCalls.find((message) =>
+        message.includes("pnpm --filter call-liner sandbox:run --"),
+      );
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(errorCalls.some((message) => message.includes("不足パラメータを補完したサンプルコマンド"))).toBe(
+        true,
+      );
+      expect(sampleCommand).toContain("--stub-refresh-token");
+      expect(sampleCommand).toContain("rotated-refresh-token");
+      expect(sampleCommand).toContain("--stub-github-repos-status");
+      expect(sampleCommand).toContain("401");
+      expect(sampleCommand).toContain(
+        "https://app.test/githubinfo?code=sample-code&state=sample-state",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prints sample command when callback validation fails via redirect", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-cli-hint-redirect-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "callback.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) {
+    return redirect("https://app.test/error?title=fail&message=code+or+state+missing&code=missing_params");
+  }
+  return new Response("ok", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+      ]);
+
+      const errorCalls = errorSpy.mock.calls.map((call) => String(call[0] ?? ""));
+      const sampleCommand = errorCalls.find((message) =>
+        message.includes("pnpm --filter call-liner sandbox:run --"),
+      );
+
+      expect(errorCalls.some((message) => message.includes("不足パラメータを補完したサンプルコマンド"))).toBe(
+        true,
+      );
+      expect(sampleCommand).toContain(
+        "https://app.test/githubinfo?code=sample-code&state=sample-state",
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs oauth-two-step scenario and prints step results as json", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-oauth-cli-"));
 
@@ -421,6 +520,81 @@ export async function loader(_args: LoaderFunctionArgs) {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("replays githubinfo refresh flow with 401 repos response in single scenario", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-refresh-cli-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "githubinfo-refresh.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  const reposRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated");
+  if (reposRes.status === 401) {
+    const refreshRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+    });
+    const refreshJson = await refreshRes.json().catch(() => null);
+    if (refreshJson && typeof refreshJson.access_token === "string") {
+      return new Response("refreshed", {
+        status: 302,
+        headers: {
+          Location: "/githubinfo",
+        },
+      });
+    }
+  }
+  return new Response("no-refresh", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+        "--stub-refresh-token",
+        "rotated-refresh-token",
+        "--stub-github-repos-status",
+        "401",
+      ]);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const output = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+        steps: Array<{ type: string; status?: number; location?: string | null }>;
+        trace: Array<{ type: string; url?: string }>;
+      };
+
+      expect(output.steps[0]?.type).toBe("request");
+      expect(output.steps[0]?.status).toBe(302);
+      expect(output.steps[0]?.location).toBe("/githubinfo");
+      expect(
+        output.trace.some(
+          (event) =>
+            event.type === "fetch" &&
+            event.url?.startsWith("https://github.com/login/oauth/access_token"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("throws when --stub-github-repos-status is not integer", async () => {
+    await expect(
+      runSandboxCli([
+        "--loader-file",
+        "/tmp/callback.tsx",
+        "--url",
+        "https://app.test",
+        "--stub-github-repos-status",
+        "bad",
+      ]),
+    ).rejects.toThrow("Expected integer HTTP status code for --stub-github-repos-status");
   });
 
   it("injects memory-client database strategy globals in single scenario", async () => {

@@ -102,6 +102,7 @@ pnpm --filter call-liner sandbox:run -- \
 
 ## 設計ドキュメント
 
+- [docs README（sandbox 検証メモ）](docs/README.md)
 - [Timeline Sandbox 実装方針（ドラフト）](docs/timeline-sandbox-implementation-plan.md)
 
 ## AST(JSON) 変換の利用例

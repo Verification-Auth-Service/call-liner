@@ -180,6 +180,17 @@ export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
     if (parsed.scenario === "single") {
       const singleOutput = await runSingleScenario(parsed, sessionRecord);
       console.log(JSON.stringify(singleOutput, null, 2));
+      const sampleCommand = buildMissingOauthParamSampleCommand(
+        parsed,
+        singleOutput.steps,
+        rawArgs,
+      );
+
+      // callback URL の code/state が不足している場合は再現用コマンドを補助表示する。
+      if (sampleCommand) {
+        console.error("不足パラメータを補完したサンプルコマンド:");
+        console.error(sampleCommand);
+      }
       return;
     }
 
@@ -188,6 +199,76 @@ export const runSandboxCli = async (rawArgs: string[]): Promise<void> => {
   } finally {
     restoreEnvOverrides(originalEnvValues);
   }
+};
+
+const buildMissingOauthParamSampleCommand = (
+  parsed: ParsedSingleCliArgs,
+  steps: Array<
+    | { type: "request"; id?: string; status: number; location: string | null; body: string }
+    | { type: "advance_time"; fromMs: number; toMs: number }
+    | { type: "replay"; target: string | number; status: number; location: string | null; body: string }
+  >,
+  rawArgs: string[],
+): string | undefined => {
+  const requestUrl = new URL(parsed.url);
+  const hasCode = requestUrl.searchParams.get("code");
+  const hasState = requestUrl.searchParams.get("state");
+
+  // code/state が両方揃っている場合は補完不要。
+  if (hasCode && hasState) {
+    return undefined;
+  }
+
+  const latestHttpStep = [...steps]
+    .reverse()
+    .find((step) => step.type === "request" || step.type === "replay");
+
+  // HTTP step が無い場合は不足パラメータの補完提案を作れない。
+  if (!latestHttpStep) {
+    return undefined;
+  }
+
+  // callback 失敗は 4xx 本文だけでなく error ページへの 3xx redirect でも返りうる。
+  const isErrorLikeStatus = latestHttpStep.status >= 300;
+  const errorBody = latestHttpStep.body.toLowerCase();
+  const locationText = latestHttpStep.location?.toLowerCase() ?? "";
+  const hintsAtCodeStateValidation =
+    errorBody.includes("code") ||
+    errorBody.includes("state") ||
+    errorBody.includes("不足") ||
+    errorBody.includes("missing") ||
+    locationText.includes("code=missing_params") ||
+    locationText.includes("code") ||
+    locationText.includes("state") ||
+    locationText.includes("不足") ||
+    locationText.includes("missing");
+
+  // 失敗系で、かつ code/state 検証エラーに見える場合だけ提案を出す。
+  if (!isErrorLikeStatus || !hintsAtCodeStateValidation) {
+    return undefined;
+  }
+
+  // 実際に不足している query だけ補完し、既存値は尊重する。
+  if (!hasCode) {
+    requestUrl.searchParams.set("code", "sample-code");
+  }
+  if (!hasState) {
+    requestUrl.searchParams.set("state", "sample-state");
+  }
+
+  const sanitizedArgs = rawArgs.filter((arg) => arg !== "--");
+  const urlIndex = sanitizedArgs.findIndex((arg) => arg === "--url");
+
+  // 元コマンドに --url がなければ補完コマンドを安全に生成できない。
+  if (urlIndex === -1 || urlIndex + 1 >= sanitizedArgs.length) {
+    return undefined;
+  }
+
+  const argsWithPatchedUrl = [...sanitizedArgs];
+  argsWithPatchedUrl[urlIndex + 1] = requestUrl.toString();
+
+  const escapedArgs = argsWithPatchedUrl.map((arg) => JSON.stringify(arg)).join(" ");
+  return `pnpm --filter call-liner sandbox:run -- ${escapedArgs}`;
 };
 
 const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
@@ -427,6 +508,16 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       continue;
     }
 
+    // GitHub repos API の status を差し替え、401→refresh 分岐の再現を可能にする。
+    if (arg === "--stub-github-repos-status") {
+      fetchStubOverrides.githubUserReposStatus = parseHttpStatusCode(
+        requireNextValue(arg, nextValue),
+        arg,
+      );
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -606,6 +697,22 @@ const parseDatabaseStrategy = (raw: string): DatabaseStubStrategyName => {
   throw new Error(
     `Unknown database strategy: ${raw}. Expected one of none, memory-client`,
   );
+};
+
+const parseHttpStatusCode = (raw: string, arg: string): number => {
+  const status = Number.parseInt(raw, 10);
+
+  // 数値に変換できない入力は status として意味を持たないため拒否する。
+  if (Number.isNaN(status)) {
+    throw new Error(`Expected integer HTTP status code for ${arg}`);
+  }
+
+  // 100-599 以外は HTTP status の範囲外なので拒否する。
+  if (status < 100 || status > 599) {
+    throw new Error(`Expected HTTP status code in range 100-599 for ${arg}`);
+  }
+
+  return status;
 };
 
 const runSingleScenario = async (

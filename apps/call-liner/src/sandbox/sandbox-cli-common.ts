@@ -4,6 +4,7 @@ import type { SandboxFetchStub } from "./runtime";
 export type DefaultFetchStubOverrides = {
   githubAccessToken?: string;
   githubRefreshToken?: string;
+  githubUserReposStatus?: number;
 };
 
 /**
@@ -145,6 +146,8 @@ export const restoreEnvOverrides = (
 export const buildDefaultFetchStubs = (
   overrides?: DefaultFetchStubOverrides,
 ): SandboxFetchStub[] => {
+  const githubUserReposStatus = overrides?.githubUserReposStatus ?? 200;
+
   return [
     {
       matcher: "https://github.com/login/oauth/access_token",
@@ -155,6 +158,30 @@ export const buildDefaultFetchStubs = (
             "Content-Type": "application/json",
           },
         }),
+    },
+    {
+      matcher: "https://api.github.com/user/repos",
+      response: () =>
+        new Response(
+          JSON.stringify(
+            // エラー系の再現時は GitHub API らしい失敗ボディを返して分岐確認しやすくする。
+            githubUserReposStatus >= 400
+              ? { message: "Bad credentials" }
+              : [
+                  {
+                    id: 100,
+                    full_name: "sandbox-user/sandbox-repo",
+                    html_url: "https://github.com/sandbox-user/sandbox-repo",
+                  },
+                ],
+          ),
+          {
+            status: githubUserReposStatus,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
     },
     {
       matcher: "https://api.github.com/user",
