@@ -10,6 +10,7 @@ import {
   type RunLoaderInSandboxResult,
   type SandboxLoader,
   type SandboxState,
+  type SandboxTraceEvent,
 } from "./runtime";
 import {
   runSandbox,
@@ -80,6 +81,15 @@ type OauthSerializedStep = {
   location: string | null;
   state: string | null;
   body: string;
+  effects: OauthStepEffects;
+};
+
+type OauthStepEffects = {
+  fetchCount: number;
+  tokenEndpointFetchCount: number;
+  cookieSetNames: string[];
+  dbWriteCount: number;
+  dbOperations: Array<{ model: string; operation: string }>;
 };
 
 type OauthSpecRuleId =
@@ -88,13 +98,15 @@ type OauthSpecRuleId =
   | "replay_state_must_reject"
   | "double_callback_must_reject"
   | "callback_before_authorize_must_reject"
-  | "callback_after_expiry_must_reject";
+  | "callback_after_expiry_must_reject"
+  | "token_error_must_reject";
 
 type OauthSpecViolation = {
   attackId: string;
   ruleId: OauthSpecRuleId;
   expected: string;
   actualStatus: number;
+  observedSideEffects: string[];
   stepType: "authorize" | "callback" | "refresh";
   vulnerability: true;
 };
@@ -115,9 +127,29 @@ type OauthStateFuzzingAttackResult = {
 type OauthActionNode = "authorize" | "callback" | "refresh";
 
 type OauthGraphPathResult = {
-  order: OauthActionNode[];
+  id: string;
+  kind: "order_permutation" | "stateful_extension";
+  order: string[];
   steps: OauthSerializedStep[];
   violations: OauthSpecViolation[];
+};
+
+type OauthDbOperationTrace = {
+  model: string;
+  operation: string;
+};
+
+type OauthRuntimeDepsFactory = (
+  record: Map<string, unknown>,
+  dbTrace: OauthDbOperationTrace[],
+) => {
+  redirect: (url: string, init?: ResponseInit) => Response;
+  getSession: () => Promise<ReturnType<typeof createInMemorySession>>;
+  commitSession: (
+    session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void },
+    options?: { maxAge?: number },
+  ) => Promise<string>;
+  globals: Record<string, unknown>;
 };
 
 /**
@@ -638,7 +670,10 @@ const runOauthTwoStepScenario = async (
   cookieJar: ReturnType<typeof createSandboxState>["cookieJar"];
   trace: ReturnType<typeof createSandboxState>["trace"];
 }> => {
-  const createRuntimeDeps = (record: Map<string, unknown>) => ({
+  const createRuntimeDeps = (
+    record: Map<string, unknown>,
+    dbTrace: OauthDbOperationTrace[],
+  ) => ({
     redirect: (url: string, init?: ResponseInit) => {
       const headers = new Headers(init?.headers);
       headers.set("Location", url);
@@ -653,11 +688,15 @@ const runOauthTwoStepScenario = async (
         strategyName: parsed.databaseStrategyName,
         globalName: parsed.databaseGlobalName,
         modelNames: parsed.databaseModelNames,
+        operationObserver: (event) => {
+          dbTrace.push(event);
+        },
       }),
     },
   });
   const state = createSandboxState();
-  const runtimeDeps = createRuntimeDeps(sessionRecord);
+  const baseDbTrace: OauthDbOperationTrace[] = [];
+  const runtimeDeps = createRuntimeDeps(sessionRecord, baseDbTrace);
   const authorizeLoader = await loadRouteLoaderFromFile(
     parsed.authorizeLoaderFile,
     runtimeDeps,
@@ -666,9 +705,6 @@ const runOauthTwoStepScenario = async (
     parsed.callbackLoaderFile,
     runtimeDeps,
   );
-  const refreshLoader = parsed.refreshLoaderFile
-    ? await loadRouteLoaderFromFile(parsed.refreshLoaderFile, runtimeDeps)
-    : undefined;
   const fetchStubs = buildDefaultFetchStubs(parsed.fetchStubOverrides);
 
   const result = await runOauthTwoStepSandbox({
@@ -689,18 +725,13 @@ const runOauthTwoStepScenario = async (
   const fuzzing = parsed.enableStateFuzzing
     ? await runOauthStateFuzzing({
         parsed,
-        authorizeLoader,
-        callbackLoader,
         createRuntimeDeps,
       })
     : undefined;
   const graphExploration = parsed.enableGraphExplore
     ? await runOauthGraphExplore({
         parsed,
-        authorizeLoader,
-        callbackLoader,
-        refreshLoader,
-        fetchStubs,
+        createRuntimeDeps,
       })
     : undefined;
 
@@ -716,17 +747,7 @@ const runOauthTwoStepScenario = async (
 
 const runOauthStateFuzzing = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
-  createRuntimeDeps: (record: Map<string, unknown>) => {
-    redirect: (url: string, init?: ResponseInit) => Response;
-    getSession: () => Promise<ReturnType<typeof createInMemorySession>>;
-    commitSession: (
-      session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void },
-      options?: { maxAge?: number },
-    ) => Promise<string>;
-    globals: Record<string, unknown>;
-  };
+  createRuntimeDeps: OauthRuntimeDepsFactory;
 }): Promise<{
   attacks: OauthStateFuzzingAttackResult[];
   vulnerabilities: OauthSpecViolation[];
@@ -737,49 +758,43 @@ const runOauthStateFuzzing = async (input: {
   attacks.push(
     await runMissingStateAttack({
       parsed: input.parsed,
-      authorizeLoader: input.authorizeLoader,
-      callbackLoader: input.callbackLoader,
+      createRuntimeDeps: input.createRuntimeDeps,
       defaultCode,
     }),
   );
   attacks.push(
     await runReplayStateAttack({
       parsed: input.parsed,
-      authorizeLoader: input.authorizeLoader,
-      callbackLoader: input.callbackLoader,
+      createRuntimeDeps: input.createRuntimeDeps,
       defaultCode,
     }),
   );
   attacks.push(
     await runDifferentStateAttack({
       parsed: input.parsed,
-      authorizeLoader: input.authorizeLoader,
-      callbackLoader: input.callbackLoader,
+      createRuntimeDeps: input.createRuntimeDeps,
       defaultCode,
     }),
   );
   attacks.push(
     await runDoubleCallbackAttack({
       parsed: input.parsed,
-      authorizeLoader: input.authorizeLoader,
-      callbackLoader: input.callbackLoader,
+      createRuntimeDeps: input.createRuntimeDeps,
       defaultCode,
     }),
   );
   attacks.push(
     await runCallbackBeforeAuthorizeAttack({
       parsed: input.parsed,
-      callbackLoader: input.callbackLoader,
+      createRuntimeDeps: input.createRuntimeDeps,
       defaultCode,
     }),
   );
   attacks.push(
     await runCallbackAfterExpiryAttack({
       parsed: input.parsed,
-      authorizeLoader: input.authorizeLoader,
-      callbackLoader: input.callbackLoader,
-      defaultCode,
       createRuntimeDeps: input.createRuntimeDeps,
+      defaultCode,
     }),
   );
 
@@ -791,32 +806,22 @@ const runOauthStateFuzzing = async (input: {
 
 const runMissingStateAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const baseState = createSandboxState();
-  const runResult = await runOauthTwoStepSandbox({
-    authorizeLoader: input.authorizeLoader,
-    callbackLoader: input.callbackLoader,
-    state: baseState,
-    authorizeRequest: {
-      url: input.parsed.authorizeUrl,
-      method: "GET",
-    },
-    callbackUrlBase: input.parsed.callbackUrlBase,
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
+  const flow = await runAuthorizeCallbackFlow({
+    parsed: input.parsed,
+    context,
     callbackCode: input.defaultCode,
     callbackStateStrategy: "missing",
-    authorizeFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
-    callbackFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
   });
-  const steps = await serializeOauthStepResults(runResult.steps);
-  const callbackStep = steps.find((step) => step.type === "callback");
+  const callbackStep = flow.steps.find((step) => step.type === "callback");
 
   return {
     id: "missing_state",
     title: "missing state",
-    steps,
+    steps: flow.steps,
     violations: validateOauthSpec(
       "missing_state",
       callbackStep ? [toSpecCheck("missing_state_must_reject", callbackStep)] : [],
@@ -827,44 +832,32 @@ const runMissingStateAttack = async (input: {
 
 const runReplayStateAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const baseState = createSandboxState();
-  const runResult = await runOauthTwoStepSandbox({
-    authorizeLoader: input.authorizeLoader,
-    callbackLoader: input.callbackLoader,
-    state: baseState,
-    authorizeRequest: {
-      url: input.parsed.authorizeUrl,
-      method: "GET",
-    },
-    callbackUrlBase: input.parsed.callbackUrlBase,
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
+  const flow = await runAuthorizeCallbackFlow({
+    parsed: input.parsed,
+    context,
     callbackCode: input.defaultCode,
     callbackStateStrategy: "match_authorize",
-    authorizeFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
-    callbackFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
   });
-  let state = runResult.nextState;
-  const replay = await runLoaderInSandbox({
-    loader: input.callbackLoader,
-    state,
-    request: runResult.callbackRequest,
+  const replay = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: flow.nextState,
+    request: flow.callbackRequest,
     fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: flow.nextDbCursor,
   });
-  state = replay.nextState;
-  const steps = await serializeOauthMixedStepResults([
-    ...runResult.steps,
-    toManualStepResult("callback", runResult.callbackRequest.url, replay),
-  ]);
-  const callbackSteps = steps.filter((step) => step.type === "callback");
+  const callbackSteps = [...flow.steps, replay.step].filter((step) => step.type === "callback");
   const replayStep = callbackSteps[1];
 
   return {
     id: "replay_state",
     title: "replay state",
-    steps,
+    steps: [...flow.steps, replay.step],
     violations: validateOauthSpec(
       "replay_state",
       replayStep ? [toSpecCheck("replay_state_must_reject", replayStep)] : [],
@@ -875,32 +868,22 @@ const runReplayStateAttack = async (input: {
 
 const runDifferentStateAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const baseState = createSandboxState();
-  const runResult = await runOauthTwoStepSandbox({
-    authorizeLoader: input.authorizeLoader,
-    callbackLoader: input.callbackLoader,
-    state: baseState,
-    authorizeRequest: {
-      url: input.parsed.authorizeUrl,
-      method: "GET",
-    },
-    callbackUrlBase: input.parsed.callbackUrlBase,
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
+  const flow = await runAuthorizeCallbackFlow({
+    parsed: input.parsed,
+    context,
     callbackCode: input.defaultCode,
     callbackStateStrategy: "tampered",
-    authorizeFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
-    callbackFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
   });
-  const steps = await serializeOauthStepResults(runResult.steps);
-  const callbackStep = steps.find((step) => step.type === "callback");
+  const callbackStep = flow.steps.find((step) => step.type === "callback");
 
   return {
     id: "different_state",
     title: "different state",
-    steps,
+    steps: flow.steps,
     violations: validateOauthSpec(
       "different_state",
       callbackStep ? [toSpecCheck("state_mismatch_must_reject", callbackStep)] : [],
@@ -911,58 +894,49 @@ const runDifferentStateAttack = async (input: {
 
 const runDoubleCallbackAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const baseState = createSandboxState();
-  const runResult = await runOauthTwoStepSandbox({
-    authorizeLoader: input.authorizeLoader,
-    callbackLoader: input.callbackLoader,
-    state: baseState,
-    authorizeRequest: {
-      url: input.parsed.authorizeUrl,
-      method: "GET",
-    },
-    callbackUrlBase: input.parsed.callbackUrlBase,
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
+  const flow = await runAuthorizeCallbackFlow({
+    parsed: input.parsed,
+    context,
     callbackCode: input.defaultCode,
     callbackStateStrategy: "match_authorize",
-    authorizeFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
-    callbackFetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
   });
-  const firstCallback = runResult.steps[1];
+  const callbackSteps = flow.steps.filter((step) => step.type === "callback");
+  const firstCallback = callbackSteps[0];
 
   // callback が想定外に取得できない場合は追撃 request を構築できないため失敗させる。
   if (!firstCallback) {
     throw new Error("double callback attack requires callback step");
   }
 
-  const firstState = firstCallback.state ?? "sandbox-state";
   const secondRequest = buildManualCallbackRequest(
     input.parsed.callbackUrlBase,
     `${input.defaultCode}-second`,
-    firstState,
+    firstCallback.state ?? "sandbox-state",
   );
-  const secondCallback = await runLoaderInSandbox({
-    loader: input.callbackLoader,
-    state: runResult.nextState,
+  const second = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: flow.nextState,
     request: secondRequest,
     fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: flow.nextDbCursor,
   });
-  const steps = await serializeOauthMixedStepResults([
-    ...runResult.steps,
-    toManualStepResult("callback", secondRequest.url, secondCallback),
-  ]);
-  const callbackSteps = steps.filter((step) => step.type === "callback");
-  const secondStep = callbackSteps[1];
+  const secondCallbackStep = [...flow.steps, second.step].filter(
+    (step) => step.type === "callback",
+  )[1];
 
   return {
     id: "double_callback",
     title: "double callback",
-    steps,
+    steps: [...flow.steps, second.step],
     violations: validateOauthSpec(
       "double_callback",
-      secondStep ? [toSpecCheck("double_callback_must_reject", secondStep)] : [],
+      secondCallbackStep ? [toSpecCheck("double_callback_must_reject", secondCallbackStep)] : [],
       input.parsed.enableSpecValidation,
     ),
   };
@@ -970,35 +944,32 @@ const runDoubleCallbackAttack = async (input: {
 
 const runCallbackBeforeAuthorizeAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const baseState = createSandboxState();
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
   const callbackRequest = buildManualCallbackRequest(
     input.parsed.callbackUrlBase,
     input.defaultCode,
     "state-before-authorize",
   );
-  const callback = await runLoaderInSandbox({
-    loader: input.callbackLoader,
-    state: baseState,
+  const callback = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: createSandboxState(),
     request: callbackRequest,
     fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: 0,
   });
-  const steps = await serializeOauthMixedStepResults([
-    toManualStepResult("callback", callbackRequest.url, callback),
-  ]);
-  const callbackStep = steps[0];
 
   return {
     id: "callback_before_authorize",
     title: "callback before authorize",
-    steps,
+    steps: [callback.step],
     violations: validateOauthSpec(
       "callback_before_authorize",
-      callbackStep
-        ? [toSpecCheck("callback_before_authorize_must_reject", callbackStep)]
-        : [],
+      [toSpecCheck("callback_before_authorize_must_reject", callback.step)],
       input.parsed.enableSpecValidation,
     ),
   };
@@ -1006,72 +977,51 @@ const runCallbackBeforeAuthorizeAttack = async (input: {
 
 const runCallbackAfterExpiryAttack = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
   defaultCode: string;
-  createRuntimeDeps: (record: Map<string, unknown>) => {
-    redirect: (url: string, init?: ResponseInit) => Response;
-    getSession: () => Promise<ReturnType<typeof createInMemorySession>>;
-    commitSession: (
-      session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void },
-      options?: { maxAge?: number },
-    ) => Promise<string>;
-    globals: Record<string, unknown>;
-  };
 }): Promise<OauthStateFuzzingAttackResult> => {
-  const sessionRecord = new Map<string, unknown>(input.parsed.sessionEntries);
-  const runtimeDeps = input.createRuntimeDeps(sessionRecord);
-  const authorizeLoader = await loadRouteLoaderFromFile(
-    input.parsed.authorizeLoaderFile,
-    runtimeDeps,
-  );
-  const callbackLoader = await loadRouteLoaderFromFile(
-    input.parsed.callbackLoaderFile,
-    runtimeDeps,
-  );
-  const authorize = await runLoaderInSandbox({
-    loader: authorizeLoader,
+  const context = await createIsolatedOauthContext(input.parsed, input.createRuntimeDeps);
+  const authorize = await executeOauthStep({
+    type: "authorize",
+    loader: context.authorizeLoader,
     state: createSandboxState(),
     request: {
       url: input.parsed.authorizeUrl,
       method: "GET",
     },
     fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: 0,
   });
-  const authorizeLocation = authorize.response.headers.get("Location");
-  const authorizeState = authorizeLocation
-    ? new URL(authorizeLocation, "https://sandbox.local").searchParams.get("state")
-    : "sandbox-state";
+  const authorizeState = authorize.step.state ?? "sandbox-state";
 
   // session 期限切れを擬似再現するため、expiry 時点で oauth state を破棄する。
-  sessionRecord.delete("oauth:state");
+  context.sessionRecord.delete("oauth:state");
   const callbackRequest = buildManualCallbackRequest(
     input.parsed.callbackUrlBase,
     input.defaultCode,
     authorizeState,
   );
-  const callback = await runLoaderInSandbox({
-    loader: callbackLoader,
+  const callback = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
     state: {
       ...authorize.nextState,
       nowMs: authorize.nextState.nowMs + input.parsed.stateExpiryMs,
     },
     request: callbackRequest,
     fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: authorize.nextDbCursor,
   });
-  const steps = await serializeOauthMixedStepResults([
-    toManualStepResult("authorize", input.parsed.authorizeUrl, authorize),
-    toManualStepResult("callback", callbackRequest.url, callback),
-  ]);
-  const callbackStep = steps.find((step) => step.type === "callback");
 
   return {
     id: "callback_after_expiry",
     title: "callback after expiry",
-    steps,
+    steps: [authorize.step, callback.step],
     violations: validateOauthSpec(
       "callback_after_expiry",
-      callbackStep ? [toSpecCheck("callback_after_expiry_must_reject", callbackStep)] : [],
+      [toSpecCheck("callback_after_expiry_must_reject", callback.step)],
       input.parsed.enableSpecValidation,
     ),
   };
@@ -1079,109 +1029,511 @@ const runCallbackAfterExpiryAttack = async (input: {
 
 const runOauthGraphExplore = async (input: {
   parsed: ParsedOauthTwoStepCliArgs;
-  authorizeLoader: SandboxLoader;
-  callbackLoader: SandboxLoader;
-  refreshLoader?: SandboxLoader;
-  fetchStubs: ReturnType<typeof buildDefaultFetchStubs>;
+  createRuntimeDeps: OauthRuntimeDepsFactory;
 }): Promise<{
   paths: OauthGraphPathResult[];
   vulnerabilities: OauthSpecViolation[];
 }> => {
   const actions: OauthActionNode[] = ["authorize", "callback"];
+  const hasRefresh = Boolean(input.parsed.refreshLoaderFile && input.parsed.refreshUrl);
 
-  // refresh loader があるケースだけ 3 ノード順列探索を有効化する。
-  if (input.refreshLoader) {
+  // refresh loader/path が揃うケースだけ 3 ノード順列探索を有効化する。
+  if (hasRefresh) {
     actions.push("refresh");
   }
   const orders = permutations(actions);
   const paths: OauthGraphPathResult[] = [];
 
   for (const order of orders) {
-    let state = createSandboxState();
-    const steps: Array<OauthTwoStepResult | OauthSerializedStep> = [];
-    let authorizeState: string | null = null;
-    let seenAuthorize = false;
-
-    for (const action of order) {
-      // action 種別ごとに request の作り方が異なるため、分岐して実行する。
-      if (action === "authorize") {
-        const authorize = await runLoaderInSandbox({
-          loader: input.authorizeLoader,
-          state,
-          request: {
-            url: input.parsed.authorizeUrl,
-            method: "GET",
-          },
-          fetchStubs: input.fetchStubs,
-        });
-        state = authorize.nextState;
-        const location = authorize.response.headers.get("Location");
-        authorizeState = location
-          ? new URL(location, "https://sandbox.local").searchParams.get("state")
-          : null;
-        seenAuthorize = true;
-        steps.push(toManualStepResult("authorize", input.parsed.authorizeUrl, authorize));
-        continue;
-      }
-
-      if (action === "callback") {
-        const callbackRequest = buildManualCallbackRequest(
-          input.parsed.callbackUrlBase,
-          input.parsed.callbackCode ?? "sandbox-code",
-          seenAuthorize ? authorizeState : "callback-before-authorize",
-        );
-        const callback = await runLoaderInSandbox({
-          loader: input.callbackLoader,
-          state,
-          request: callbackRequest,
-          fetchStubs: input.fetchStubs,
-        });
-        state = callback.nextState;
-        steps.push(toManualStepResult("callback", callbackRequest.url, callback));
-        continue;
-      }
-
-      // refresh は loader/path が揃う場合だけ実行対象として扱う。
-      if (!input.refreshLoader || !input.parsed.refreshUrl) {
-        continue;
-      }
-      const refresh = await runLoaderInSandbox({
-        loader: input.refreshLoader,
-        state,
-        request: {
-          url: input.parsed.refreshUrl,
-          method: "GET",
-        },
-        fetchStubs: input.fetchStubs,
-      });
-      state = refresh.nextState;
-      steps.push(toManualStepResult("refresh", input.parsed.refreshUrl, refresh));
-    }
-
-    const serializedSteps = await serializeOauthMixedStepResults(steps);
-    const callbackIndex = order.indexOf("callback");
-    const authorizeIndex = order.indexOf("authorize");
-    const callbackStep = serializedSteps.find((step) => step.type === "callback");
-    const checks =
-      callbackStep && callbackIndex !== -1 && authorizeIndex !== -1 && callbackIndex < authorizeIndex
-        ? [toSpecCheck("callback_before_authorize_must_reject", callbackStep)]
-        : [];
-
-    paths.push({
-      order,
-      steps: serializedSteps,
-      violations: validateOauthSpec(
-        `graph:${order.join("->")}`,
-        checks,
-        input.parsed.enableSpecValidation,
-      ),
-    });
+    paths.push(await runGraphOrderPermutationPath(input.parsed, input.createRuntimeDeps, order));
   }
+
+  paths.push(await runGraphReplayExtensionPath(input.parsed, input.createRuntimeDeps));
+  paths.push(await runGraphExpiryExtensionPath(input.parsed, input.createRuntimeDeps));
+  paths.push(await runGraphInvalidGrantExtensionPath(input.parsed, input.createRuntimeDeps));
 
   return {
     paths,
     vulnerabilities: paths.flatMap((pathResult) => pathResult.violations),
   };
+};
+
+const OAUTH_DB_WRITE_OPERATIONS = new Set([
+  "upsert",
+  "create",
+  "update",
+  "delete",
+  "createMany",
+  "updateMany",
+  "deleteMany",
+]);
+
+const createIsolatedOauthContext = async (
+  parsed: ParsedOauthTwoStepCliArgs,
+  createRuntimeDeps: OauthRuntimeDepsFactory,
+): Promise<{
+  sessionRecord: Map<string, unknown>;
+  dbTrace: OauthDbOperationTrace[];
+  authorizeLoader: SandboxLoader;
+  callbackLoader: SandboxLoader;
+  refreshLoader?: SandboxLoader;
+}> => {
+  const sessionRecord = new Map<string, unknown>(parsed.sessionEntries);
+  const dbTrace: OauthDbOperationTrace[] = [];
+  const runtimeDeps = createRuntimeDeps(sessionRecord, dbTrace);
+  const authorizeLoader = await loadRouteLoaderFromFile(
+    parsed.authorizeLoaderFile,
+    runtimeDeps,
+  );
+  const callbackLoader = await loadRouteLoaderFromFile(
+    parsed.callbackLoaderFile,
+    runtimeDeps,
+  );
+  const refreshLoader = parsed.refreshLoaderFile
+    ? await loadRouteLoaderFromFile(parsed.refreshLoaderFile, runtimeDeps)
+    : undefined;
+
+  return {
+    sessionRecord,
+    dbTrace,
+    authorizeLoader,
+    callbackLoader,
+    refreshLoader,
+  };
+};
+
+const runAuthorizeCallbackFlow = async (input: {
+  parsed: ParsedOauthTwoStepCliArgs;
+  context: {
+    dbTrace: OauthDbOperationTrace[];
+    authorizeLoader: SandboxLoader;
+    callbackLoader: SandboxLoader;
+  };
+  callbackCode: string;
+  callbackStateStrategy: OauthCallbackStateStrategy;
+  fixedCallbackState?: string;
+}): Promise<{
+  steps: OauthSerializedStep[];
+  callbackRequest: { url: string; method: "GET" };
+  nextState: SandboxState;
+  nextDbCursor: number;
+}> => {
+  const authorize = await executeOauthStep({
+    type: "authorize",
+    loader: input.context.authorizeLoader,
+    state: createSandboxState(),
+    request: {
+      url: input.parsed.authorizeUrl,
+      method: "GET",
+    },
+    fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: input.context.dbTrace,
+    dbCursor: 0,
+  });
+  const authorizeState = authorize.step.state;
+  const callbackState = resolveCallbackState({
+    callbackStateStrategy: input.callbackStateStrategy,
+    fixedCallbackState: input.fixedCallbackState,
+    authorizeState,
+  });
+  const callbackRequest = buildManualCallbackRequest(
+    input.parsed.callbackUrlBase,
+    input.callbackCode,
+    callbackState,
+  );
+  const callback = await executeOauthStep({
+    type: "callback",
+    loader: input.context.callbackLoader,
+    state: authorize.nextState,
+    request: callbackRequest,
+    fetchStubs: buildDefaultFetchStubs(input.parsed.fetchStubOverrides),
+    dbTrace: input.context.dbTrace,
+    dbCursor: authorize.nextDbCursor,
+  });
+
+  return {
+    steps: [authorize.step, callback.step],
+    callbackRequest,
+    nextState: callback.nextState,
+    nextDbCursor: callback.nextDbCursor,
+  };
+};
+
+const executeOauthStep = async (input: {
+  type: "authorize" | "callback" | "refresh";
+  loader: SandboxLoader;
+  state: SandboxState;
+  request: { url: string; method: "GET" };
+  fetchStubs: ReturnType<typeof buildDefaultFetchStubs>;
+  dbTrace: OauthDbOperationTrace[];
+  dbCursor: number;
+}): Promise<{
+  step: OauthSerializedStep;
+  nextState: SandboxState;
+  nextDbCursor: number;
+}> => {
+  const previousTraceLength = input.state.trace.length;
+  const result = await runLoaderInSandbox({
+    loader: input.loader,
+    state: input.state,
+    request: input.request,
+    fetchStubs: input.fetchStubs,
+  });
+  const nextDbCursor = input.dbTrace.length;
+  const effects = collectOauthStepEffects({
+    trace: result.nextState.trace,
+    traceFrom: previousTraceLength,
+    dbTrace: input.dbTrace,
+    dbFrom: input.dbCursor,
+  });
+  const location = result.response.headers.get("Location");
+  const state = location
+    ? new URL(location, "https://sandbox.local").searchParams.get("state")
+    : new URL(input.request.url, "https://sandbox.local").searchParams.get("state");
+  const body = await result.response.text().catch(() => "");
+
+  return {
+    step: {
+      type: input.type,
+      requestUrl: input.request.url,
+      status: result.response.status,
+      location,
+      state,
+      body,
+      effects,
+    },
+    nextState: result.nextState,
+    nextDbCursor,
+  };
+};
+
+const collectOauthStepEffects = (input: {
+  trace: SandboxTraceEvent[];
+  traceFrom: number;
+  dbTrace: OauthDbOperationTrace[];
+  dbFrom: number;
+}): OauthStepEffects => {
+  const traceSlice = input.trace.slice(input.traceFrom);
+  const dbSlice = input.dbTrace.slice(input.dbFrom);
+  const cookieSetNames = new Set<string>();
+  let fetchCount = 0;
+  let tokenEndpointFetchCount = 0;
+
+  for (const event of traceSlice) {
+    // fetch/cookie_set 以外は認証副作用判定に使わないため無視する。
+    if (event.type === "fetch") {
+      fetchCount += 1;
+
+      // token endpoint への通信は認証成立に直結する副作用として扱う。
+      if (isTokenEndpointFetch(event.url)) {
+        tokenEndpointFetchCount += 1;
+      }
+      continue;
+    }
+
+    if (event.type === "cookie_set") {
+      cookieSetNames.add(event.name);
+    }
+  }
+
+  return {
+    fetchCount,
+    tokenEndpointFetchCount,
+    cookieSetNames: [...cookieSetNames],
+    dbWriteCount: dbSlice.filter((event) => OAUTH_DB_WRITE_OPERATIONS.has(event.operation))
+      .length,
+    dbOperations: dbSlice,
+  };
+};
+
+const isTokenEndpointFetch = (url: string): boolean => {
+  return /\/oauth\/(access_token|token)(\?|$)/i.test(url);
+};
+
+const runGraphOrderPermutationPath = async (
+  parsed: ParsedOauthTwoStepCliArgs,
+  createRuntimeDeps: OauthRuntimeDepsFactory,
+  order: OauthActionNode[],
+): Promise<OauthGraphPathResult> => {
+  const context = await createIsolatedOauthContext(parsed, createRuntimeDeps);
+  const steps: OauthSerializedStep[] = [];
+  let state = createSandboxState();
+  let dbCursor = 0;
+  let authorizeState: string | null = null;
+  let seenAuthorize = false;
+
+  for (const action of order) {
+    // action 種別ごとに request の作り方が異なるため、分岐して実行する。
+    if (action === "authorize") {
+      const authorize = await executeOauthStep({
+        type: "authorize",
+        loader: context.authorizeLoader,
+        state,
+        request: {
+          url: parsed.authorizeUrl,
+          method: "GET",
+        },
+        fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+        dbTrace: context.dbTrace,
+        dbCursor,
+      });
+      steps.push(authorize.step);
+      state = authorize.nextState;
+      dbCursor = authorize.nextDbCursor;
+      authorizeState = authorize.step.state;
+      seenAuthorize = true;
+      continue;
+    }
+
+    if (action === "callback") {
+      const callback = await executeOauthStep({
+        type: "callback",
+        loader: context.callbackLoader,
+        state,
+        request: buildManualCallbackRequest(
+          parsed.callbackUrlBase,
+          parsed.callbackCode ?? "sandbox-code",
+          seenAuthorize ? authorizeState : "callback-before-authorize",
+        ),
+        fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+        dbTrace: context.dbTrace,
+        dbCursor,
+      });
+      steps.push(callback.step);
+      state = callback.nextState;
+      dbCursor = callback.nextDbCursor;
+      continue;
+    }
+
+    // refresh は loader/path が揃う場合だけ実行対象として扱う。
+    if (!context.refreshLoader || !parsed.refreshUrl) {
+      continue;
+    }
+    const refresh = await executeOauthStep({
+      type: "refresh",
+      loader: context.refreshLoader,
+      state,
+      request: {
+        url: parsed.refreshUrl,
+        method: "GET",
+      },
+      fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+      dbTrace: context.dbTrace,
+      dbCursor,
+    });
+    steps.push(refresh.step);
+    state = refresh.nextState;
+    dbCursor = refresh.nextDbCursor;
+  }
+
+  const callbackIndex = order.indexOf("callback");
+  const authorizeIndex = order.indexOf("authorize");
+  const callbackStep = steps.find((step) => step.type === "callback");
+  const checks =
+    callbackStep && callbackIndex !== -1 && authorizeIndex !== -1 && callbackIndex < authorizeIndex
+      ? [toSpecCheck("callback_before_authorize_must_reject", callbackStep)]
+      : [];
+
+  return {
+    id: `graph:${order.join("->")}`,
+    kind: "order_permutation",
+    order,
+    steps,
+    violations: validateOauthSpec(
+      `graph:${order.join("->")}`,
+      checks,
+      parsed.enableSpecValidation,
+    ),
+  };
+};
+
+const runGraphReplayExtensionPath = async (
+  parsed: ParsedOauthTwoStepCliArgs,
+  createRuntimeDeps: OauthRuntimeDepsFactory,
+): Promise<OauthGraphPathResult> => {
+  const context = await createIsolatedOauthContext(parsed, createRuntimeDeps);
+  const flow = await runAuthorizeCallbackFlow({
+    parsed,
+    context,
+    callbackCode: parsed.callbackCode ?? "sandbox-code",
+    callbackStateStrategy: "match_authorize",
+  });
+  const replay = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: flow.nextState,
+    request: flow.callbackRequest,
+    fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: flow.nextDbCursor,
+  });
+
+  return {
+    id: "graph:stateful:callback_replay",
+    kind: "stateful_extension",
+    order: ["authorize", "callback", "callback"],
+    steps: [...flow.steps, replay.step],
+    violations: validateOauthSpec(
+      "graph:stateful:callback_replay",
+      [toSpecCheck("replay_state_must_reject", replay.step)],
+      parsed.enableSpecValidation,
+    ),
+  };
+};
+
+const runGraphExpiryExtensionPath = async (
+  parsed: ParsedOauthTwoStepCliArgs,
+  createRuntimeDeps: OauthRuntimeDepsFactory,
+): Promise<OauthGraphPathResult> => {
+  const context = await createIsolatedOauthContext(parsed, createRuntimeDeps);
+  const authorize = await executeOauthStep({
+    type: "authorize",
+    loader: context.authorizeLoader,
+    state: createSandboxState(),
+    request: {
+      url: parsed.authorizeUrl,
+      method: "GET",
+    },
+    fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: 0,
+  });
+
+  // expiry 時点の状態不整合を再現するため、callback 前に oauth state を削除する。
+  context.sessionRecord.delete("oauth:state");
+  const callback = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: {
+      ...authorize.nextState,
+      nowMs: authorize.nextState.nowMs + parsed.stateExpiryMs,
+    },
+    request: buildManualCallbackRequest(
+      parsed.callbackUrlBase,
+      parsed.callbackCode ?? "sandbox-code",
+      authorize.step.state ?? "sandbox-state",
+    ),
+    fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: authorize.nextDbCursor,
+  });
+
+  return {
+    id: "graph:stateful:callback_after_expiry",
+    kind: "stateful_extension",
+    order: ["authorize", "advance_time", "callback"],
+    steps: [authorize.step, callback.step],
+    violations: validateOauthSpec(
+      "graph:stateful:callback_after_expiry",
+      [toSpecCheck("callback_after_expiry_must_reject", callback.step)],
+      parsed.enableSpecValidation,
+    ),
+  };
+};
+
+const runGraphInvalidGrantExtensionPath = async (
+  parsed: ParsedOauthTwoStepCliArgs,
+  createRuntimeDeps: OauthRuntimeDepsFactory,
+): Promise<OauthGraphPathResult> => {
+  const context = await createIsolatedOauthContext(parsed, createRuntimeDeps);
+  const authorize = await executeOauthStep({
+    type: "authorize",
+    loader: context.authorizeLoader,
+    state: createSandboxState(),
+    request: {
+      url: parsed.authorizeUrl,
+      method: "GET",
+    },
+    fetchStubs: buildDefaultFetchStubs(parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: 0,
+  });
+  const callback = await executeOauthStep({
+    type: "callback",
+    loader: context.callbackLoader,
+    state: authorize.nextState,
+    request: buildManualCallbackRequest(
+      parsed.callbackUrlBase,
+      parsed.callbackCode ?? "sandbox-code",
+      authorize.step.state ?? "sandbox-state",
+    ),
+    fetchStubs: buildInvalidGrantFetchStubs(parsed.fetchStubOverrides),
+    dbTrace: context.dbTrace,
+    dbCursor: authorize.nextDbCursor,
+  });
+
+  return {
+    id: "graph:stateful:token_invalid_grant",
+    kind: "stateful_extension",
+    order: ["authorize", "callback(fetch:invalid_grant)"],
+    steps: [authorize.step, callback.step],
+    violations: validateOauthSpec(
+      "graph:stateful:token_invalid_grant",
+      [toSpecCheck("token_error_must_reject", callback.step)],
+      parsed.enableSpecValidation,
+    ),
+  };
+};
+
+const buildInvalidGrantFetchStubs = (
+  overrides: DefaultFetchStubOverrides,
+): ReturnType<typeof buildDefaultFetchStubs> => {
+  const invalidGrantStub = {
+    matcher: "https://github.com/login/oauth/access_token",
+    response: new Response(
+      JSON.stringify({
+        error: "invalid_grant",
+        error_description: "The provided authorization grant is invalid.",
+      }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    ),
+  };
+  return [invalidGrantStub, ...buildDefaultFetchStubs(overrides)];
+};
+
+const resolveCallbackState = (input: {
+  callbackStateStrategy: OauthCallbackStateStrategy;
+  fixedCallbackState?: string;
+  authorizeState: string | null;
+}): string | null => {
+  // authorize 由来 state を使うのが 2 ステップ探索の基準挙動。
+  if (input.callbackStateStrategy === "match_authorize") {
+    // authorize redirect に state がない場合は比較条件が作れない。
+    if (input.authorizeState === null) {
+      throw new Error(
+        "authorize response does not contain state query, cannot use match_authorize",
+      );
+    }
+
+    return input.authorizeState;
+  }
+
+  // 改ざんケースでは authorize state と異なる値を callback に注入する。
+  if (input.callbackStateStrategy === "tampered") {
+    // 明示指定があれば固定値で改ざん状態を再現する。
+    if (input.fixedCallbackState !== undefined) {
+      return input.fixedCallbackState;
+    }
+
+    return input.authorizeState ? `${input.authorizeState}-tampered` : "tampered-state";
+  }
+
+  // 欠落ケースは callback 側バリデーションの挙動確認用に使う。
+  if (input.callbackStateStrategy === "missing") {
+    return null;
+  }
+
+  // 固定値ケースでは明示 state が無いと再現条件を満たせない。
+  if (input.fixedCallbackState === undefined) {
+    throw new Error("fixed state strategy requires fixedCallbackState");
+  }
+
+  return input.fixedCallbackState;
 };
 
 const buildManualCallbackRequest = (
@@ -1203,52 +1555,6 @@ const buildManualCallbackRequest = (
     url: callbackUrl.toString(),
     method: "GET",
   };
-};
-
-const toManualStepResult = (
-  type: "authorize" | "callback" | "refresh",
-  requestUrl: string,
-  result: RunLoaderInSandboxResult,
-): OauthSerializedStep => {
-  const location = result.response.headers.get("Location");
-  const state = location
-    ? new URL(location, "https://sandbox.local").searchParams.get("state")
-    : new URL(requestUrl, "https://sandbox.local").searchParams.get("state");
-
-  return {
-    type,
-    requestUrl,
-    status: result.response.status,
-    location,
-    state,
-    body: "",
-  };
-};
-
-const serializeOauthMixedStepResults = async (
-  steps: Array<OauthTwoStepResult | OauthSerializedStep>,
-): Promise<OauthSerializedStep[]> => {
-  const serialized: OauthSerializedStep[] = [];
-
-  for (const step of steps) {
-    // 既に直列化済みのステップは body だけ後段で補完する。
-    if ("status" in step && "body" in step) {
-      serialized.push(step);
-      continue;
-    }
-
-    const body = await step.response.text().catch(() => "");
-    serialized.push({
-      type: step.type,
-      requestUrl: step.requestUrl,
-      status: step.response.status,
-      location: step.location,
-      state: step.state,
-      body,
-    });
-  }
-
-  return serialized;
 };
 
 const toSpecCheck = (
@@ -1274,16 +1580,36 @@ const validateOauthSpec = (
   const violations: OauthSpecViolation[] = [];
 
   for (const check of checks) {
-    // OAuth callback の拒否系判定は 4xx/5xx を reject として扱う。
-    if (check.step.status >= 400) {
+    const sideEffects: string[] = [];
+
+    // token endpoint fetch は reject ケースでは 0 回が期待値。
+    if (check.step.effects.tokenEndpointFetchCount > 0) {
+      sideEffects.push(
+        `token endpoint fetch x${check.step.effects.tokenEndpointFetchCount}`,
+      );
+    }
+
+    // reject ケースで cookie_set があると認証セッション成立の疑いがある。
+    if (check.step.effects.cookieSetNames.length > 0) {
+      sideEffects.push(`cookie set: ${check.step.effects.cookieSetNames.join(", ")}`);
+    }
+
+    // DB write は拒否後に発生してはならない副作用として扱う。
+    if (check.step.effects.dbWriteCount > 0) {
+      sideEffects.push(`db write x${check.step.effects.dbWriteCount}`);
+    }
+
+    // 副作用が無い reject は HTTP status に依存せず安全側として扱う。
+    if (sideEffects.length === 0) {
       continue;
     }
 
     violations.push({
       attackId,
       ruleId: check.ruleId,
-      expected: "status >= 400 (reject)",
+      expected: "no auth side effects (token fetch / cookie set / db write)",
       actualStatus: check.step.status,
+      observedSideEffects: sideEffects,
       stepType: check.step.type,
       vulnerability: true,
     });
@@ -1443,6 +1769,13 @@ const serializeOauthStepResults = async (
       location: step.location,
       state: step.state,
       body,
+      effects: {
+        fetchCount: 0,
+        tokenEndpointFetchCount: 0,
+        cookieSetNames: [],
+        dbWriteCount: 0,
+        dbOperations: [],
+      },
     });
   }
 

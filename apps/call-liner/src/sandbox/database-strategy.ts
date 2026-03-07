@@ -4,6 +4,7 @@ export type DatabaseStubConfig = {
   strategyName: DatabaseStubStrategyName;
   globalName?: string;
   modelNames?: string[];
+  operationObserver?: (event: { model: string; operation: string }) => void;
 };
 
 type DatabaseStubStrategy = {
@@ -59,7 +60,10 @@ const createMemoryClientStrategy = (
   }
 
   const client = Object.fromEntries(
-    modelNames.map((modelName) => [modelName, createMemoryModelDelegate()]),
+    modelNames.map((modelName) => [
+      modelName,
+      createMemoryModelDelegate(modelName, config.operationObserver),
+    ]),
   );
 
   return {
@@ -69,9 +73,25 @@ const createMemoryClientStrategy = (
   };
 };
 
-const createMemoryModelDelegate = (): Record<string, unknown> => {
+const createMemoryModelDelegate = (
+  modelName: string,
+  observer?: (event: { model: string; operation: string }) => void,
+): Record<string, unknown> => {
+  const notify = (operation: string): void => {
+    // observer 未指定時は DB 操作トレースを無効として通常実行のみ行う。
+    if (!observer) {
+      return;
+    }
+
+    observer({
+      model: modelName,
+      operation,
+    });
+  };
+
   return {
     upsert: async (args: { update?: unknown; create?: unknown } = {}) => {
+      notify("upsert");
       // upsert は update/create いずれかの入力を返し、呼び出し先の期待を満たす。
       if (args.update !== undefined) {
         return args.update;
@@ -83,11 +103,29 @@ const createMemoryModelDelegate = (): Record<string, unknown> => {
 
       return {};
     },
-    create: async (args: { data?: unknown } = {}) => args.data ?? {},
-    update: async (args: { data?: unknown } = {}) => args.data ?? {},
-    findUnique: async () => null,
-    findFirst: async () => null,
-    findMany: async () => [],
-    delete: async (args: { where?: unknown } = {}) => args.where ?? {},
+    create: async (args: { data?: unknown } = {}) => {
+      notify("create");
+      return args.data ?? {};
+    },
+    update: async (args: { data?: unknown } = {}) => {
+      notify("update");
+      return args.data ?? {};
+    },
+    findUnique: async () => {
+      notify("findUnique");
+      return null;
+    },
+    findFirst: async () => {
+      notify("findFirst");
+      return null;
+    },
+    findMany: async () => {
+      notify("findMany");
+      return [];
+    },
+    delete: async (args: { where?: unknown } = {}) => {
+      notify("delete");
+      return args.where ?? {};
+    },
   };
 };

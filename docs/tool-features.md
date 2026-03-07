@@ -95,8 +95,8 @@
 - `--state-mode <match_authorize|tampered|missing|fixed>`（既定 `match_authorize`）
 - `--callback-state <state>`（`fixed` では実質必須）
 - `--state-fuzzing`（OAuth 攻撃ケースを自動生成）
-- `--graph-explore`（action 順序の順列探索）
-- `--spec-validate`（仕様違反を vulnerability として検出）
+- `--graph-explore`（action 順序 + 状態/時間/外部応答の探索）
+- `--spec-validate`（副作用ベースで仕様違反を vulnerability として検出）
 - `--refresh-loader-file <path>`（graph exploration 用の refresh loader）
 - `--refresh-url <request-url>`（`--refresh-loader-file` 指定時必須）
 - `--state-expiry-ms <int>`（`callback_after_expiry` の経過時間、既定 `610000`）
@@ -124,13 +124,22 @@
     - `double_callback`
     - `callback_before_authorize`
     - `callback_after_expiry`
+  - 出力 `steps[]` には各 step の `effects`（fetch/cookie/db 副作用サマリ）が含まれる。
 - `--graph-explore`:
-  - action 順序の順列を全探索する。
+  - action 順序の順列に加え、状態/時間/外部応答を含む拡張パスも探索する。
   - `--refresh-loader-file` なし: `authorize/callback` の 2 順列
   - `--refresh-loader-file` あり: `authorize/callback/refresh` の 6 順列
+  - 追加される stateful extension:
+    - `authorize -> callback -> callback`（callback replay）
+    - `authorize -> advance_time -> callback`（expiry 後 callback）
+    - `authorize -> callback(fetch:invalid_grant)`（token endpoint 失敗応答）
 - `--spec-validate`:
-  - 仕様ルールに反するステータスを `vulnerability` として出力する。
-  - 判定は「reject 必須ケースで `status < 400`」を違反として扱う。
+  - reject 必須ケースで「認証副作用」が発生した場合を `vulnerability` として出力する。
+  - 判定対象の副作用:
+    - token endpoint fetch
+    - `Set-Cookie`（`cookie_set`）
+    - DB write（`memory-client` の `upsert/create/update/delete` など）
+  - HTTP status のみでは判定しない（`302` でも副作用が無ければ許容）。
 
 ---
 
@@ -178,6 +187,10 @@ route loader ロード時に以下を注入:
 `memory-client` で提供される delegate メソッド:
 
 - `upsert`, `create`, `update`, `findUnique`, `findFirst`, `findMany`, `delete`
+
+補足:
+
+- oauth-two-step の `--spec-validate` は `memory-client` 使用時に DB operation も副作用判定へ取り込む。
 
 `memory-client` 注意点:
 
@@ -309,7 +322,14 @@ pnpm --filter call-liner sandbox:run -- \
       "status": 302,
       "location": "https://github.com/login/oauth/authorize?...&state=state-1",
       "state": "state-1",
-      "body": ""
+      "body": "",
+      "effects": {
+        "fetchCount": 0,
+        "tokenEndpointFetchCount": 0,
+        "cookieSetNames": [],
+        "dbWriteCount": 0,
+        "dbOperations": []
+      }
     },
     {
       "type": "callback",
@@ -317,7 +337,14 @@ pnpm --filter call-liner sandbox:run -- \
       "status": 200,
       "location": null,
       "state": "state-1",
-      "body": "ok"
+      "body": "ok",
+      "effects": {
+        "fetchCount": 2,
+        "tokenEndpointFetchCount": 1,
+        "cookieSetNames": ["session"],
+        "dbWriteCount": 1,
+        "dbOperations": [{ "model": "user", "operation": "upsert" }]
+      }
     }
   ],
   "callbackRequest": {
@@ -344,8 +371,9 @@ pnpm --filter call-liner sandbox:run -- \
       {
         "attackId": "different_state",
         "ruleId": "state_mismatch_must_reject",
-        "expected": "status >= 400 (reject)",
+        "expected": "no auth side effects (token fetch / cookie set / db write)",
         "actualStatus": 200,
+        "observedSideEffects": ["cookie set: session"],
         "stepType": "callback",
         "vulnerability": true
       }
@@ -364,8 +392,27 @@ pnpm --filter call-liner sandbox:run -- \
   "callbackRequest": { "url": "https://app.test/auth/github/callback?code=sandbox-code&state=state-1", "method": "GET" },
   "graphExploration": {
     "paths": [
-      { "order": ["authorize", "callback", "refresh"], "steps": [], "violations": [] },
-      { "order": ["callback", "authorize", "refresh"], "steps": [], "violations": [] }
+      {
+        "id": "graph:authorize->callback->refresh",
+        "kind": "order_permutation",
+        "order": ["authorize", "callback", "refresh"],
+        "steps": [],
+        "violations": []
+      },
+      {
+        "id": "graph:stateful:callback_replay",
+        "kind": "stateful_extension",
+        "order": ["authorize", "callback", "callback"],
+        "steps": [],
+        "violations": []
+      },
+      {
+        "id": "graph:stateful:token_invalid_grant",
+        "kind": "stateful_extension",
+        "order": ["authorize", "callback(fetch:invalid_grant)"],
+        "steps": [],
+        "violations": []
+      }
     ],
     "vulnerabilities": []
   },
