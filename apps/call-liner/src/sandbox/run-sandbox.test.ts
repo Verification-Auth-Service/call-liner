@@ -423,6 +423,81 @@ export async function loader(_args: LoaderFunctionArgs) {
     }
   });
 
+  it("replays githubinfo refresh flow with 401 repos response in single scenario", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-refresh-cli-"));
+
+    try {
+      const routeFilePath = path.join(tempRoot, "githubinfo-refresh.tsx");
+      const source = `
+import type { LoaderFunctionArgs } from "react-router";
+
+export async function loader(_args: LoaderFunctionArgs) {
+  const reposRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated");
+  if (reposRes.status === 401) {
+    const refreshRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+    });
+    const refreshJson = await refreshRes.json().catch(() => null);
+    if (refreshJson && typeof refreshJson.access_token === "string") {
+      return new Response("refreshed", {
+        status: 302,
+        headers: {
+          Location: "/githubinfo",
+        },
+      });
+    }
+  }
+  return new Response("no-refresh", { status: 200 });
+}
+`;
+      await writeFile(routeFilePath, source, "utf8");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+      await runSandboxCli([
+        "--loader-file",
+        routeFilePath,
+        "--url",
+        "https://app.test/githubinfo",
+        "--stub-refresh-token",
+        "rotated-refresh-token",
+        "--stub-github-repos-status",
+        "401",
+      ]);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const output = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+        steps: Array<{ type: string; status?: number; location?: string | null }>;
+        trace: Array<{ type: string; url?: string }>;
+      };
+
+      expect(output.steps[0]?.type).toBe("request");
+      expect(output.steps[0]?.status).toBe(302);
+      expect(output.steps[0]?.location).toBe("/githubinfo");
+      expect(
+        output.trace.some(
+          (event) =>
+            event.type === "fetch" &&
+            event.url?.startsWith("https://github.com/login/oauth/access_token"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("throws when --stub-github-repos-status is not integer", async () => {
+    await expect(
+      runSandboxCli([
+        "--loader-file",
+        "/tmp/callback.tsx",
+        "--url",
+        "https://app.test",
+        "--stub-github-repos-status",
+        "bad",
+      ]),
+    ).rejects.toThrow("Expected integer HTTP status code for --stub-github-repos-status");
+  });
+
   it("injects memory-client database strategy globals in single scenario", async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-sandbox-db-cli-"));
 

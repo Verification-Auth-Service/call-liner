@@ -427,6 +427,16 @@ const parseSandboxCliArgs = (rawArgs: string[]): ParsedCliArgs => {
       continue;
     }
 
+    // GitHub repos API の status を差し替え、401→refresh 分岐の再現を可能にする。
+    if (arg === "--stub-github-repos-status") {
+      fetchStubOverrides.githubUserReposStatus = parseHttpStatusCode(
+        requireNextValue(arg, nextValue),
+        arg,
+      );
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -606,6 +616,22 @@ const parseDatabaseStrategy = (raw: string): DatabaseStubStrategyName => {
   throw new Error(
     `Unknown database strategy: ${raw}. Expected one of none, memory-client`,
   );
+};
+
+const parseHttpStatusCode = (raw: string, arg: string): number => {
+  const status = Number.parseInt(raw, 10);
+
+  // 数値に変換できない入力は status として意味を持たないため拒否する。
+  if (Number.isNaN(status)) {
+    throw new Error(`Expected integer HTTP status code for ${arg}`);
+  }
+
+  // 100-599 以外は HTTP status の範囲外なので拒否する。
+  if (status < 100 || status > 599) {
+    throw new Error(`Expected HTTP status code in range 100-599 for ${arg}`);
+  }
+
+  return status;
 };
 
 const runSingleScenario = async (
