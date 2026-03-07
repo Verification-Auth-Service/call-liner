@@ -22,6 +22,14 @@ interface WrittenFilesTree {
   [key: string]: WrittenFilesTree | string;
 }
 
+type RunExecutionOptions = {
+  baseDir?: string;
+  outputDir?: string;
+  cleanOutputDir?: boolean;
+  interactive?: boolean;
+  log?: boolean;
+};
+
 function resolveEntryType(
   entries: Map<string, string[]>,
   sourcePath: string,
@@ -221,18 +229,34 @@ async function resolveEntriesWithFramework(
  * - `-d` 指定時のみ report/source 配下の AST(JSON) が生成される
  * - `--ast-json` 指定時のみ report/ast-data.json が生成される
  */
-export async function run(argv: string[]): Promise<void> {
+export async function run(
+  argv: string[],
+  executionOptions: RunExecutionOptions = {},
+): Promise<void> {
   const options = parseCliArgs(argv);
 
   // pnpm 経由実行では INIT_CWD が起点ディレクトリになるため、相対パス解決の基準に使う。
-  const baseDir = process.env.INIT_CWD
-    ? path.resolve(process.env.INIT_CWD)
-    : process.cwd();
-  const outputDir = path.resolve(baseDir, "report");
+  const baseDir = executionOptions.baseDir
+    ? path.resolve(executionOptions.baseDir)
+    : process.env.INIT_CWD
+      ? path.resolve(process.env.INIT_CWD)
+      : process.cwd();
+  const outputDir = executionOptions.outputDir
+    ? path.resolve(baseDir, executionOptions.outputDir)
+    : path.resolve(baseDir, "report");
+  const interactive = executionOptions.interactive ?? true;
+  const shouldLog = executionOptions.log ?? true;
 
   // 既存の出力先がある場合は、誤上書きを避けるために確認を挟む。
   if (existsSync(outputDir)) {
-    const accepted = await promptDeleteOutputDir(outputDir);
+    let accepted = false;
+
+    // CI などの非対話実行では、明示指定された場合だけ安全に削除する。
+    if (!interactive) {
+      accepted = executionOptions.cleanOutputDir === true;
+    } else {
+      accepted = await promptDeleteOutputDir(outputDir);
+    }
 
     // ユーザーが拒否した場合は副作用を起こさず終了する。
     if (!accepted) {
@@ -317,7 +341,8 @@ export async function run(argv: string[]): Promise<void> {
     );
   }
 
-  if (writtenFiles.size > 0) {
+  // デバッグ出力を有効にしたときだけ生成ファイル一覧を表示する。
+  if (shouldLog && writtenFiles.size > 0) {
     console.log(`生成されたファイル:`);
     for (const file of writtenFiles.values()) {
       console.log(`  - ${file}`);
@@ -348,5 +373,8 @@ export async function run(argv: string[]): Promise<void> {
     ),
     "utf8",
   );
-  console.log(`report ディレクトリを保存しました: ${outputDir}`);
+  // 対話利用では成果物保存先を通知し、CI では不要ログを避ける。
+  if (shouldLog) {
+    console.log(`report ディレクトリを保存しました: ${outputDir}`);
+  }
 }
