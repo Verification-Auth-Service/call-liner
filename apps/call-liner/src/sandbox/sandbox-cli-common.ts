@@ -50,7 +50,7 @@ export const parseKeyValue = (raw: string, flag: string): [string, string] => {
  * 入力例:
  * - sessionRecord: new Map([["oauth:state", "state-1"]])
  * 出力例:
- * - get/set を持つ SessionLike
+ * - get/set/unset を持つ SessionLike
  */
 export const createInMemorySession = (
   sessionRecord: Map<string, unknown>,
@@ -59,6 +59,10 @@ export const createInMemorySession = (
     get: (key: string) => sessionRecord.get(key),
     set: (key: string, value: unknown) => {
       sessionRecord.set(key, value);
+    },
+    // callback 側で state 消費時に session.unset を呼ぶ実装へ対応する。
+    unset: (key: string) => {
+      sessionRecord.delete(key);
     },
   };
 };

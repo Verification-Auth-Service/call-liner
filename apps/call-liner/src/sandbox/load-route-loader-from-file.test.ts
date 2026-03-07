@@ -42,6 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         getSession: async () => ({
           get: (key: string) => sessionMap.get(key),
           set: (key: string, value: unknown) => sessionMap.set(key, value),
+          unset: (key: string) => sessionMap.delete(key),
         }),
         commitSession: async () => "session=test; Max-Age=30; Path=/",
       });
@@ -69,7 +70,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await expect(
         loadRouteLoaderFromFile(routeFilePath, {
           redirect: (url) => new Response(null, { status: 302, headers: { Location: url } }),
-          getSession: async () => ({ get: () => undefined, set: () => undefined }),
+          getSession: async () => ({
+            get: () => undefined,
+            set: () => undefined,
+            unset: () => undefined,
+          }),
           commitSession: async () => "session=test; Path=/",
         }),
       ).rejects.toThrow("loader export was not found");
@@ -99,7 +104,11 @@ export async function loader(_args: LoaderFunctionArgs) {
           headers.set("Location", url);
           return new Response(null, { ...init, status: init?.status ?? 302, headers });
         },
-        getSession: async () => ({ get: () => undefined, set: () => undefined }),
+        getSession: async () => ({
+          get: () => undefined,
+          set: () => undefined,
+          unset: () => undefined,
+        }),
         commitSession: async () => "session=test; Path=/",
         globals: {
           createState: () => "state-from-global",
