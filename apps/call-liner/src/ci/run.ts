@@ -47,6 +47,8 @@ type SingleTaskConfig = {
     global?: string;
     models?: string[];
   };
+  stubRefreshToken?: string;
+  stubGithubReposStatus?: number;
   advanceMs?: number[];
   replay?: Array<string | number>;
   expectStatus?: number;
@@ -75,6 +77,8 @@ type OauthTwoStepTaskConfig = {
     global?: string;
     models?: string[];
   };
+  stubRefreshToken?: string;
+  stubGithubReposStatus?: number;
   failOnVulnerability?: boolean;
 };
 
@@ -369,6 +373,7 @@ const buildSingleArgv = (task: SingleTaskConfig, projectRoot: string): string[] 
   appendRecordArgs(argv, "--session", task.session);
   appendRecordArgs(argv, "--env", task.env);
   appendDatabaseArgs(argv, task.database);
+  appendFetchStubArgs(argv, task);
 
   for (const advanceMs of task.advanceMs ?? []) {
     argv.push("--advance-ms", String(advanceMs));
@@ -491,6 +496,7 @@ const buildOauthTwoStepArgv = (
   appendRecordArgs(argv, "--session", task.session);
   appendRecordArgs(argv, "--env", task.env);
   appendDatabaseArgs(argv, task.database);
+  appendFetchStubArgs(argv, task);
 
   return argv;
 };
@@ -538,6 +544,24 @@ const appendDatabaseArgs = (
 
   for (const modelName of database.models ?? []) {
     argv.push("--database-model", modelName);
+  }
+};
+
+const appendFetchStubArgs = (
+  argv: string[],
+  task: {
+    stubRefreshToken?: string;
+    stubGithubReposStatus?: number;
+  },
+): void => {
+  // refresh token を固定したいケースだけ token stub を上書きする。
+  if (task.stubRefreshToken) {
+    argv.push("--stub-refresh-token", task.stubRefreshToken);
+  }
+
+  // GitHub repos API の status を変えたいケースだけ失敗スタブを追加する。
+  if (task.stubGithubReposStatus !== undefined) {
+    argv.push("--stub-github-repos-status", String(task.stubGithubReposStatus));
   }
 };
 

@@ -156,4 +156,174 @@ export async function loader(_args: LoaderFunctionArgs) {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("passes oauth-two-step database and refresh-token stub options from config", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "call-liner-ci-oauth-"));
+
+    try {
+      const projectRoot = path.join(tempRoot, "apps", "auth-app");
+      const authorizeFile = path.join(
+        projectRoot,
+        "app",
+        "routes",
+        "auth+",
+        "github-app+",
+        "_index.tsx",
+      );
+      const callbackFile = path.join(
+        projectRoot,
+        "app",
+        "routes",
+        "auth+",
+        "github-app+",
+        "callback.tsx",
+      );
+      const configPath = path.join(tempRoot, "call-liner.ci.json");
+
+      await mkdir(path.dirname(authorizeFile), { recursive: true });
+      await mkdir(path.dirname(callbackFile), { recursive: true });
+      await writeFile(
+        authorizeFile,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { commitSession, getSession } from "~/services/session.server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request);
+  session.set("oauth:state", "sandbox-state");
+  session.set("oauth:verifier", "sandbox-verifier");
+  session.set("oauth:createdAt", Date.now());
+  const setCookie = await commitSession(session, { maxAge: 60 });
+  return redirect("https://github.com/login/oauth/authorize?state=sandbox-state", {
+    headers: {
+      "Set-Cookie": setCookie,
+    },
+  });
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        callbackFile,
+        `
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import { commitSession, getSession } from "~/services/session.server";
+import { prisma } from "@sample-auth-app/db";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request);
+  const url = new URL(request.url);
+
+  if (session.get("oauth:state") !== url.searchParams.get("state")) {
+    // state 不一致時は reject 側分岐へ入ることを明示する。
+    return new Response("invalid state", { status: 400 });
+  }
+
+  const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+  });
+  const tokenJson = await tokenRes.json();
+
+  if (tokenJson.refresh_token !== "rotated-refresh-token") {
+    // refresh token stub が未反映なら CI 設定の引き回し不備として失敗させる。
+    return new Response("missing refresh token", { status: 500 });
+  }
+
+  await prisma.oAuthAccount.upsert({
+    where: {
+      provider_providerAccountId: {
+        provider: "github_app",
+        providerAccountId: "1",
+      },
+    },
+    update: {
+      refreshToken: tokenJson.refresh_token,
+    },
+    create: {
+      refreshToken: tokenJson.refresh_token,
+      user: { create: {} },
+    },
+  });
+
+  session.set("github:refresh_token", String(tokenJson.refresh_token));
+  const setCookie = await commitSession(session, { maxAge: 60 });
+  return redirect("/githubinfo", {
+    headers: {
+      "Set-Cookie": setCookie,
+    },
+  });
+}
+`,
+        "utf8",
+      );
+      await writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            version: 1,
+            projects: [
+              {
+                id: "auth-app",
+                root: "apps/auth-app",
+                tasks: [
+                  {
+                    id: "github-app-oauth",
+                    kind: "oauth-two-step",
+                    authorizeLoaderFile: "app/routes/auth+/github-app+/_index.tsx",
+                    callbackLoaderFile: "app/routes/auth+/github-app+/callback.tsx",
+                    authorizeUrl: "https://app.test/auth/github-app",
+                    callbackUrlBase: "https://app.test/auth/github-app/callback",
+                    specValidate: true,
+                    stateExpiryMs: 60000000000,
+                    stubRefreshToken: "rotated-refresh-token",
+                    database: {
+                      strategy: "memory-client",
+                      global: "prisma",
+                      models: ["user", "oAuthAccount"],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+
+      await runCi(["--config", configPath]);
+
+      const summaryRaw = await readFile(
+        path.join(tempRoot, "artifacts", "call-liner", "summary.json"),
+        "utf8",
+      );
+      const artifactRaw = await readFile(
+        path.join(tempRoot, "artifacts", "call-liner", "auth-app", "github-app-oauth.json"),
+        "utf8",
+      );
+      const summary = JSON.parse(summaryRaw) as {
+        status: string;
+        counts: { pass: number; fail: number; error: number };
+      };
+      const artifact = JSON.parse(artifactRaw) as {
+        steps: Array<{
+          type: string;
+          status: number;
+          location: string | null;
+        }>;
+      };
+
+      expect(summary.status).toBe("pass");
+      expect(summary.counts).toEqual({ pass: 1, fail: 0, error: 0 });
+      expect(artifact.steps[1]?.type).toBe("callback");
+      expect(artifact.steps[1]?.status).toBe(302);
+      expect(artifact.steps[1]?.location).toBe("/githubinfo");
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
