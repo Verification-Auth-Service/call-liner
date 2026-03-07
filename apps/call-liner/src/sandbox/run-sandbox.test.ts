@@ -94,7 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 `;
       const callbackSource = `
 import type { LoaderFunctionArgs } from "react-router";
-import { getSession } from "~/services/session.server";
+import { commitSession, getSession } from "~/services/session.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const session = await getSession(request);
@@ -102,7 +102,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (state !== session.get("oauth:state")) {
     return new Response("mismatch", { status: 409 });
   }
-  return new Response("ok", { status: 200 });
+  session.unset("oauth:state");
+  const setCookie = await commitSession(session, { maxAge: 60 });
+  return new Response("ok", { status: 200, headers: { "Set-Cookie": setCookie } });
 }
 `;
       await writeFile(authorizeFilePath, authorizeSource, "utf8");

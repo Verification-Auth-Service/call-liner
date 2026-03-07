@@ -1,5 +1,8 @@
 import { pathToFileURL } from "node:url";
-import { loadRouteLoaderFromFile } from "./load-route-loader-from-file";
+import {
+  loadRouteLoaderFromFile,
+  type SessionLike,
+} from "./load-route-loader-from-file";
 import {
   buildDatabaseStrategyGlobals,
   type DatabaseStubStrategyName,
@@ -146,7 +149,7 @@ type OauthRuntimeDepsFactory = (
   redirect: (url: string, init?: ResponseInit) => Response;
   getSession: () => Promise<ReturnType<typeof createInMemorySession>>;
   commitSession: (
-    session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void },
+    session: SessionLike,
     options?: { maxAge?: number },
   ) => Promise<string>;
   globals: Record<string, unknown>;
@@ -680,7 +683,7 @@ const runOauthTwoStepScenario = async (
       return new Response(null, { ...init, status: init?.status ?? 302, headers });
     },
     getSession: async () => createInMemorySession(record),
-    commitSession: async (session: { get: (key: string) => unknown; set: (key: string, value: unknown) => void }, options?: { maxAge?: number }) =>
+    commitSession: async (session: SessionLike, options?: { maxAge?: number }) =>
       toSetCookieHeader(record, session, options?.maxAge),
     globals: {
       ...buildDefaultSandboxGlobals(),

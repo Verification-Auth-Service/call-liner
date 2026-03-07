@@ -16,6 +16,7 @@ type RouteLoaderRuntimeDeps = {
 export type SessionLike = {
   get: (key: string) => unknown;
   set: (key: string, value: unknown) => void;
+  unset: (key: string) => void;
 };
 
 /**
