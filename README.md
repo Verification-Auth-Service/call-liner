@@ -13,25 +13,6 @@
 pnpm install
 ```
 
-## 主なコマンド
-
-静的解析:
-
-```bash
-pnpm --filter call-liner dev -- --client-entry /path/to/client.tsx
-```
-
-sandbox 実行:
-
-```bash
-pnpm --filter call-liner sandbox:run -- --loader-file /path/to/loader.tsx --url "https://app.test/example"
-```
-
-CI 実行:
-
-```bash
-pnpm --filter call-liner ci -- --config ./call-liner.ci.json
-```
 
 ## ドキュメント
 
