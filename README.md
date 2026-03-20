@@ -55,3 +55,11 @@ pnpm --filter call-liner sandbox:run -- \
   --env "GITHUB_APP_CLIENT_SECRET=dummy-client-secret" \
   --stub-refresh-token "rotated-refresh-token"
 ```
+
+## デモ
+
+CIがエラーを出すデモ
+https://github.com/Verification-Auth-Service/sample-auth-app/actions/runs/22962361438
+
+CIが成功するデモ 
+https://github.com/Verification-Auth-Service/sample-auth-app/actions/runs/22985507563
